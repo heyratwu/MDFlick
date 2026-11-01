@@ -6,6 +6,7 @@ import (
 )
 
 func main() {
+	configureReaderTextRendering()
 	manager := &application{windows: make(map[string]*readerWindow)}
 	mygo.App.SetName("MDFlick")
 	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{

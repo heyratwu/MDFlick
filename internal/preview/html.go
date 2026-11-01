@@ -9,6 +9,7 @@ import (
 	"golang.org/x/net/html"
 	"mdflick/internal/document"
 	"mdflick/internal/mermaid"
+	"mdflick/internal/typography"
 )
 
 // HTML sanitizes Markdown and authorizes only the bundled Mermaid scripts.
@@ -92,8 +93,6 @@ func HTML(source string) string {
 	if document.HasMermaid(parsed) {
 		scripts, policy = mermaid.Scripts()
 	}
-	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>
-:root{color-scheme:light dark}body{font:16px/1.65 -apple-system,BlinkMacSystemFont,sans-serif;margin:32px auto;padding:0 28px;max-width:900px;overflow-wrap:anywhere}h1,h2{line-height:1.25;border-bottom:1px solid #8885;padding-bottom:.3em}pre,code{font-family:ui-monospace,monospace;background:#8882;border-radius:5px}code{padding:.15em .3em}pre{padding:16px;overflow:auto}pre code{background:none;padding:0}blockquote{margin-left:0;padding-left:18px;border-left:4px solid #8886;color:GrayText}table{border-collapse:collapse;display:block;overflow:auto}th,td{border:1px solid #8885;padding:8px 12px}tr:nth-child(even){background:#8881}img{max-width:100%}a{color:#3984dc}
-pre.mermaid-rendered{background:transparent;font-family:inherit;white-space:normal;text-align:center}pre.mermaid-rendered svg{max-width:100%;height:auto}
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>` + typography.CSS() + `
 </style></head><body>` + body.String() + scripts + `</body></html>`
 }

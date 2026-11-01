@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 	"mdflick/internal/document"
+	"mdflick/internal/typography"
 )
 
 // readerWindow owns native resources. All fields are accessed on the UI thread.
@@ -45,13 +46,16 @@ func (a *readerWindow) view(c *ui.Context) {
 			})
 		} else {
 			if a.md == nil {
-				a.md = &markdown.Options{Theme: &markdown.Theme{FontSize: 16, LineHeight: 1.7}}
+				a.md = &markdown.Options{}
 			}
-			ui.Scroll(c).Key(a.path).Grow(1).Padding(28, 60).Children(func() {
-				markdown.View(c, a.source, a.md)
-				if a.source == "" {
-					ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted)
-				}
+			a.md.Theme = readerTheme(t.Dark)
+			ui.Scroll(c).Key(a.path).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
+				ui.Column(c).WidthPercent(100).MaxWidth(860).AlignSelf(ui.Center).Padding(40, 72, 120, 72).FontWeight(400).Children(func() {
+					markdown.View(c, a.source, a.md)
+					if a.source == "" {
+						ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted)
+					}
+				})
 			})
 		}
 	})
@@ -106,7 +110,6 @@ func (a *readerWindow) resetRenderer() {
 // New options own a new image cache; never copy Options' internal sync.Map.
 func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
 	a.md = &markdown.Options{
-		Theme:     &markdown.Theme{FontSize: 16, LineHeight: 1.7},
 		Code:      map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock},
 		LoadImage: localImages(ctx, filepath.Dir(path)),
 	}
