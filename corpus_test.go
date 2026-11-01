@@ -21,6 +21,7 @@ func TestNativeCorpus(t *testing.T) {
 				}
 				markdown.DefaultCodeBlock(c, b)
 			}
+			prepareTestReader(t, a)
 			tt := ui.NewTester(a.view, 900, 720)
 			for _, dark := range []bool{false, true} {
 				clear(found)

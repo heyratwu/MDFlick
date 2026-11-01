@@ -11,6 +11,7 @@
 - Mermaid 图表：主窗口和 Quick Look 均支持围栏标记为 `mermaid` 的图表，内置离线运行时，支持中文和系统深浅色；语法错误时保留源码。
 - 文档内的标题锚点可跳转，安全的网页链接交给默认浏览器，文档本地及 HTTP/HTTPS 网络图片异步加载，单张最多 16 MiB、位图最多 1600 万像素，同时最多加载两张，网络请求超时为 15 秒；重新载入会刷新图片缓存。
 - 内置 Quick Look Preview Extension：在 Finder 选中文件后按空格查看排版预览。
+- 同一文档内正文、表格和 HTML 对齐段落共享图片加载与解码结果；每版文档最多缓存 128 个图片地址，图片缓存估算预算为每文档 128 MiB、应用合计 256 MiB，每文档最多同时加载两张、应用最多四张。超限保留替代文字，重新载入会重置缓存。预算包含位图 RGBA 像素与保留的压缩数据，SVG 按源码大小的 8 倍加 4 KiB 估算，不代表进程或 GPU 总内存的硬上限。
 - 不提供编辑、保存或自动写回。文件使用 UTF-8，单文件最大 32 MB。
 
 ## 开发
@@ -24,6 +25,8 @@ go tool mygo vet .
 go test -race ./...
 bash scripts/test-macos-bridge.sh  # macOS：实际 Swift/C/Go 边界测试
 ```
+
+主窗口在后台读取并预处理文档，将 HTML 转换结果、对齐区间、引用、表格片段和 Mermaid 判定作为同一版本的只读快照发布；UI 构建直接使用预处理结果，MyGo 自身仍负责原生 Markdown 的解析和布局。
 
 主窗口使用 `ui/markdown.View`，通过 `Options.Code["mermaid"]` 将图表交给隐藏的 WKWebView 异步生成高清图片，按源码和主题缓存，并保留复制源码按钮。Quick Look 使用同一 MyGo Markdown parser 生成经过过滤的 HTML，通过 Swift / WKWebView 展示；CSP 仅授权内置 Mermaid 脚本，不执行文档脚本、不请求网络资源。快速预览保留表格、代码和任务列表；代码按等宽字体显示，图片显示替代文字。完整窗口支持代码语法高亮、本地和网络图片。当前锁定的 MyGo 版本不自动处理相对文档链接。
 

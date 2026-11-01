@@ -1,0 +1,62 @@
+package main
+
+import (
+	"context"
+	"github.com/egoist/mygo/ui"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func prepareTestReader(t *testing.T, a *readerWindow) {
+	t.Helper()
+	var err error
+	a.prepared, err = prepareReaderDocument(context.Background(), a.source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.html = readerHTMLState{}
+	a.generation++
+	t.Cleanup(a.releaseImages)
+}
+
+func testDocumentImages(t *testing.T, ctx context.Context, dir string) func(string) (ui.ImageSource, error) {
+	t.Helper()
+	s := newImageStore(ctx, filepath.Join(dir, "doc.md"), applicationImages)
+	t.Cleanup(s.close)
+	return s.load
+}
+
+func TestPreparedPublication(t *testing.T) {
+	a := &readerWindow{}
+	_, old := a.beginLoad()
+	_, current := a.beginLoad()
+	source := "<div align=center>\n\n[Go][ref]\n\n</div>\n\n| Name |\n|---|\n| [Go][ref] |\n\n[ref]: https://example.com\n\n```mermaid\nflowchart LR; A-->B\n```\n"
+	prepared, err := prepareReaderDocument(context.Background(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prepared.hasMermaid || len(prepared.ranges) == 0 || len(prepared.tables) != 1 || len(prepared.prose) == 0 {
+		t.Fatalf("incomplete snapshot: %+v", prepared)
+	}
+	for _, table := range prepared.tables {
+		if !strings.Contains(table, "[ref]: https://example.com") {
+			t.Fatal("table lost references")
+		}
+	}
+	if a.completePrepared(old, source, prepared, nil) || a.prepared.markdown != "" {
+		t.Fatal("stale snapshot published")
+	}
+	if !a.completePrepared(current, source, prepared, nil) || a.prepared.markdown != prepared.markdown || a.source != source {
+		t.Fatal("current snapshot lost")
+	}
+	a.close()
+	if a.completePrepared(current, "", preparedReaderDocument{}, nil) || a.source != source {
+		t.Fatal("closed window accepted snapshot")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := prepareReaderDocument(ctx, source); err != context.Canceled {
+		t.Fatal(err)
+	}
+}

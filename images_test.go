@@ -37,6 +37,7 @@ func TestImagesReloadAndCancel(t *testing.T) {
 	}
 	write(color.RGBA{R: 255, A: 255}, 1)
 	a := &readerWindow{}
+	t.Cleanup(a.releaseImages)
 	a.resetMarkdown(context.Background(), filepath.Join(dir, "doc.md"))
 	options := a.md
 	first, err := a.md.LoadImage("image.png")
@@ -59,7 +60,7 @@ func TestImagesReloadAndCancel(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := documentImages(ctx, dir)("image.png"); err != context.Canceled {
+	if _, err := testDocumentImages(t, ctx, dir)("image.png"); err != context.Canceled {
 		t.Fatal(err)
 	}
 	f, err := os.Create(path)
@@ -68,7 +69,7 @@ func TestImagesReloadAndCancel(t *testing.T) {
 	}
 	f.Truncate(maxImageBytes + 1)
 	f.Close()
-	if _, err := documentImages(context.Background(), dir)("image.png"); err == nil {
+	if _, err := testDocumentImages(t, context.Background(), dir)("image.png"); err == nil {
 		t.Fatal("oversized image accepted")
 	}
 }
@@ -109,6 +110,7 @@ func TestRemoteImages(t *testing.T) {
 	defer server.Close()
 	// Exercise the loader wired into the document's Markdown options.
 	a := &readerWindow{}
+	t.Cleanup(a.releaseImages)
 	a.resetMarkdown(context.Background(), filepath.Join(t.TempDir(), "doc.md"))
 	for _, path := range []string{"/photo?raw=1", "/redirect"} {
 		src, err := a.md.LoadImage(server.URL + path)
@@ -150,7 +152,7 @@ func TestRemoteImageCancellation(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		_, err := documentImages(ctx, t.TempDir())(server.URL + "/slow.png")
+		_, err := testDocumentImages(t, ctx, t.TempDir())(server.URL + "/slow.png")
 		result <- err
 	}()
 	select {

@@ -16,6 +16,7 @@ func TestReaderHTMLAlignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/html.md", source: string(source)}}
+	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 1000, 900)
 	// Check actual glyph positions, since text element bounds span the column.
 	r, ok := tt.Find("Read, watch, listen, and turn what you learn into Obsidian notes.")
@@ -64,6 +65,7 @@ func TestReaderHTMLAlignment(t *testing.T) {
 
 func TestReaderAlignedLinksAndReload(t *testing.T) {
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/html.md", source: "<div align=center>\n\n[Go][ref] [English](#destination)\n\n</div>\n\n" + strings.Repeat("Paragraph.\n\n", 35) + "# Destination\n\n[ref]: https://example.com\n"}}
+	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 1000, 700)
 	clicked := ""
 	a.md.OnLink = func(dest string) { clicked = dest }
@@ -86,8 +88,9 @@ func TestReaderAlignedLinksAndReload(t *testing.T) {
 		t.Fatalf("anchor scroll: before %+v, after %+v, pending %q", before, after, a.html.scrollTo)
 	}
 	a.source = "# Reloaded\n\nPlain text\n"
+	prepareTestReader(t, a)
 	tt.Frame()
-	if !tt.HasText("Reloaded") || tt.HasText("Go") || len(a.html.ranges) != 0 {
+	if !tt.HasText("Reloaded") || tt.HasText("Go") || len(a.prepared.ranges) != 0 {
 		t.Fatal("stale converted document", tt.Texts())
 	}
 }

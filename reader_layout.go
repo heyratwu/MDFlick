@@ -81,10 +81,7 @@ func (a *readerWindow) wideBlock(c *ui.Context, d *parser.Document, i int) bool 
 	_, _, wide := readerWidths(c)
 	box := ui.Column(c).Width(max(0, wide-a.blockIndent))
 	state := *ui.Local(box, readerTableKey{}, func() *readerTableState { return &readerTableState{} })
-	if state.source != d.Source() {
-		state.source = d.Source()
-		state.markdown = readerTableMarkdown(d, i)
-	}
+	state.markdown = a.prepared.tables[b.Start]
 	state.options.Theme = a.md.Theme
 	state.options.OnLink = a.md.OnLink
 	state.options.LoadImage = a.md.LoadImage
@@ -95,58 +92,6 @@ func (a *readerWindow) wideBlock(c *ui.Context, d *parser.Document, i int) bool 
 
 type readerTableKey struct{}
 type readerTableState struct {
-	source, markdown string
-	options          markdown.Options
-}
-
-func readerTableMarkdown(d *parser.Document, i int) string {
-	b := d.Block(i)
-	refs := readerReferences(d)
-	// Rebuild rows from cell source ranges to remove list/quote prefixes.
-	var table strings.Builder
-	for row := range d.Children(i) {
-		table.WriteByte('|')
-		for cell := range d.Children(row) {
-			cb := d.Block(cell)
-			table.WriteString(d.Source()[cb.Start:cb.End])
-			table.WriteByte('|')
-		}
-		table.WriteByte('\n')
-		if d.Block(row).Header {
-			table.WriteByte('|')
-			for _, align := range b.Align {
-				switch align {
-				case parser.AlignCenter:
-					table.WriteString(":---:|")
-				case parser.AlignRight:
-					table.WriteString("---:|")
-				case parser.AlignLeft:
-					table.WriteString(":---|")
-				default:
-					table.WriteString("---|")
-				}
-			}
-			table.WriteByte('\n')
-		}
-	}
-	return table.String() + "\n" + refs
-}
-
-func readerReferences(d *parser.Document) string {
-	// Keep reference definitions available to blocks rendered in nested views.
-	var refs strings.Builder
-	end := 0
-	for j := range d.Children(0) {
-		block := d.Block(j)
-		gap := strings.TrimLeft(d.Source()[end:block.Start], " \t|>")
-		if parser.Parse(gap).Len() == 1 {
-			refs.WriteString(gap)
-			refs.WriteByte('\n')
-		}
-		end = block.End
-	}
-	if gap := strings.TrimLeft(d.Source()[end:], " \t|>"); parser.Parse(gap).Len() == 1 {
-		refs.WriteString(gap)
-	}
-	return refs.String()
+	markdown string
+	options  markdown.Options
 }

@@ -8,27 +8,9 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 	"github.com/egoist/mygo/ui/markdown/parser"
-	"mdflick/internal/document"
 )
 
-type readerHTMLState struct {
-	source, markdown, references string
-	ranges                       []document.HTMLAlignment
-	scrollTo                     string
-}
-
-func (s *readerHTMLState) prepare(source string) string {
-	if s.source != source {
-		s.source = source
-		s.markdown, s.ranges = document.NativeHTML(source)
-		s.references = ""
-		s.scrollTo = ""
-		if len(s.ranges) > 0 {
-			s.references = readerReferences(parser.Parse(s.markdown))
-		}
-	}
-	return s.markdown
-}
+type readerHTMLState struct{ scrollTo string }
 
 // Keep the whole document in the outer Markdown view for heading navigation.
 // Aligned prose inherits native text alignment; headings keep stable boxes
@@ -38,15 +20,15 @@ func (a *readerWindow) readerBlock(c *ui.Context, d *parser.Document, i int) boo
 	if b.Kind != parser.Paragraph && b.Kind != parser.Heading {
 		return a.wideBlock(c, d, i)
 	}
-	k := sort.Search(len(a.html.ranges), func(k int) bool { return a.html.ranges[k].End > b.Start })
-	aligned := k < len(a.html.ranges) && a.html.ranges[k].Start <= b.Start
-	if !aligned && (b.Kind != parser.Heading || len(a.html.ranges) == 0) {
+	k := sort.Search(len(a.prepared.ranges), func(k int) bool { return a.prepared.ranges[k].End > b.Start })
+	aligned := k < len(a.prepared.ranges) && a.prepared.ranges[k].Start <= b.Start
+	if !aligned && (b.Kind != parser.Heading || len(a.prepared.ranges) == 0) {
 		return a.wideBlock(c, d, i)
 	}
 	align := ui.Start
 	alignment := ""
 	if aligned {
-		alignment = a.html.ranges[k].Align
+		alignment = a.prepared.ranges[k].Align
 	}
 	switch alignment {
 	case "center":
@@ -76,7 +58,7 @@ func (a *readerWindow) readerBlock(c *ui.Context, d *parser.Document, i int) boo
 			services.OpenURL(dest)
 		}
 	}
-	box.Children(func() { markdown.View(c, d.Source()[b.Start:b.End]+"\n\n"+a.html.references, state) })
+	box.Children(func() { markdown.View(c, a.prepared.prose[b.Start], state) })
 	return true
 }
 

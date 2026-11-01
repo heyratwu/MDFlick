@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"path/filepath"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -15,6 +14,8 @@ import (
 // readerWindow owns native resources. All fields are accessed on the UI thread.
 type readerWindow struct {
 	documentSession
+	prepared     preparedReaderDocument
+	images       *imageStore
 	win          *mygo.Window
 	md           *markdown.Options
 	renderer     *diagramRenderer
@@ -54,9 +55,12 @@ func (a *readerWindow) view(c *ui.Context) {
 			a.md.Theme = readerTheme(t.Dark)
 			a.md.CodeBlock = a.codeBlock
 			a.md.Block = a.readerBlock
-			source := a.html.prepare(a.source)
+			source := a.prepared.markdown
 			left, prose, _ := readerWidths(c)
-			ui.Scroll(c).Key(a.path).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
+			ui.Scroll(c).Key(struct {
+				Path       string
+				Generation uint64
+			}{a.path, a.generation}).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
 				ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(40, 0, 120, 0).FontWeight(400).Children(func() {
 					markdown.View(c, source, a.md)
 					if a.source == "" {
@@ -75,24 +79,28 @@ func (a *readerWindow) load() {
 	ctx, generation := a.beginLoad()
 	path, win := a.path, a.win
 	a.resetRenderer()
+	a.releaseImages()
 	go func() {
 		source, err := document.LoadContext(ctx, path)
 		if ctx.Err() != nil {
 			return
 		}
-		hasMermaid := document.DetectMermaid(source)
+		var prepared preparedReaderDocument
+		if err == nil {
+			prepared, err = prepareReaderDocument(ctx, source)
+		}
 		if ctx.Err() != nil {
 			return
 		}
 		win.Update(func() {
-			if !a.complete(generation, source, err) {
+			if !a.completePrepared(generation, source, prepared, err) {
 				return
 			}
 			if err != nil {
 				return
 			}
 			a.resetMarkdown(ctx, path)
-			if hasMermaid {
+			if prepared.hasMermaid {
 				var renderErr error
 				a.renderer, renderErr = newDiagramRenderer(a.win)
 				if renderErr != nil {
@@ -116,8 +124,30 @@ func (a *readerWindow) resetRenderer() {
 
 // New options own a new image cache; never copy Options' internal sync.Map.
 func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
+	a.releaseImages()
+	a.images = newImageStore(ctx, path, applicationImages)
 	a.md = &markdown.Options{
 		Code:      map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock},
-		LoadImage: documentImages(ctx, filepath.Dir(path)),
+		LoadImage: a.images.load,
 	}
+}
+
+func (a *readerWindow) releaseImages() {
+	if a.images != nil {
+		a.images.close()
+		a.images = nil
+	}
+	a.md = nil
+}
+
+// Publish raw and derived content together, after rejecting stale generations.
+func (a *readerWindow) completePrepared(version uint64, source string, prepared preparedReaderDocument, err error) bool {
+	if !a.complete(version, source, err) {
+		return false
+	}
+	if err == nil {
+		a.prepared = prepared
+		a.html = readerHTMLState{}
+	}
+	return true
 }

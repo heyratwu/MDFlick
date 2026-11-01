@@ -20,56 +20,43 @@ import (
 const maxImageBytes = 16 << 20
 const maxImagePixels = 16_000_000
 
-// Each document version owns its semaphore and Options cache. SVG stays under
-// the byte limit; raster dimensions are inspected before allocating pixels.
-func documentImages(ctx context.Context, dir string) func(string) (ui.ImageSource, error) {
-	slots := make(chan struct{}, 2)
-	return func(source string) (ui.ImageSource, error) {
-		select {
-		case slots <- struct{}{}:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		defer func() { <-slots }()
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if strings.Contains(source, "://") {
-			address, err := url.Parse(source)
-			if err != nil {
-				return nil, err
-			}
-			if address.Scheme == "http" || address.Scheme == "https" {
-				return remoteImage(ctx, address.String())
-			}
-			return nil, os.ErrNotExist
-		}
-		if strings.HasPrefix(source, "data:") {
-			return nil, os.ErrNotExist
-		}
-		path := strings.TrimPrefix(source, "file:")
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dir, filepath.FromSlash(path))
-		}
-		f, err := os.Open(path)
+// Loading and decoding share the store's cancellation and admission policy.
+func loadDocumentImage(ctx context.Context, dir, source string, reserve func(int64) error) (ui.ImageSource, error) {
+	if strings.Contains(source, "://") {
+		address, err := url.Parse(source)
 		if err != nil {
 			return nil, err
 		}
-		defer f.Close()
-		info, err := f.Stat()
-		if err != nil {
-			return nil, err
+		if address.Scheme == "http" || address.Scheme == "https" {
+			return remoteImage(ctx, address.String(), reserve)
 		}
-		if !info.Mode().IsRegular() || info.Size() > maxImageBytes {
-			return nil, fmt.Errorf("图片文件过大或不是普通文件")
-		}
-		// Bound bytes even if the file grows after Stat.
-		data, err := readImage(ctx, f)
-		if err != nil {
-			return nil, err
-		}
-		return decodeImage(ctx, data, strings.EqualFold(filepath.Ext(path), ".svg"))
+		return nil, os.ErrNotExist
 	}
+	if strings.HasPrefix(source, "data:") {
+		return nil, os.ErrNotExist
+	}
+	path := strings.TrimPrefix(source, "file:")
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, filepath.FromSlash(path))
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxImageBytes {
+		return nil, fmt.Errorf("图片文件过大或不是普通文件")
+	}
+	// Bound bytes even if the file grows after Stat.
+	data, err := readImage(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return decodeImage(ctx, data, strings.EqualFold(filepath.Ext(path), ".svg"), reserve)
 }
 
 const imageRequestTimeout = 15 * time.Second
@@ -87,7 +74,7 @@ var imageHTTPClient = &http.Client{
 	},
 }
 
-func remoteImage(ctx context.Context, address string) (ui.ImageSource, error) {
+func remoteImage(ctx context.Context, address string, reserve func(int64) error) (ui.ImageSource, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, err
@@ -109,14 +96,18 @@ func remoteImage(ctx context.Context, address string) (ui.ImageSource, error) {
 	}
 	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	isSVG := contentType == "image/svg+xml" || strings.EqualFold(filepath.Ext(resp.Request.URL.Path), ".svg")
-	return decodeImage(ctx, data, isSVG)
+	return decodeImage(ctx, data, isSVG, reserve)
 }
 
-func decodeImage(ctx context.Context, data []byte, isSVG bool) (ui.ImageSource, error) {
+func decodeImage(ctx context.Context, data []byte, isSVG bool, reserve func(int64) error) (ui.ImageSource, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if isSVG {
+		// SVG structures vary: charge a conservative source-based estimate.
+		if err := reserve(int64(len(data))*8 + 4096); err != nil {
+			return nil, err
+		}
 		return ui.ParseSVG(data)
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
@@ -127,6 +118,9 @@ func decodeImage(ctx context.Context, data []byte, isSVG bool) (ui.ImageSource, 
 		return nil, fmt.Errorf("图片尺寸过大")
 	}
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := reserve(int64(config.Width)*int64(config.Height)*4 + int64(len(data))); err != nil {
 		return nil, err
 	}
 	return ui.DecodeBitmap(data)

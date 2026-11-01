@@ -8,6 +8,7 @@ import (
 func TestReaderStates(t *testing.T) {
 	opened := 0
 	a := &readerWindow{open: func() { opened++ }}
+	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 900, 720)
 	if !tt.HasText("轻松阅读 Markdown") {
 		t.Fatal(tt.Texts())
@@ -22,6 +23,7 @@ func TestReaderStates(t *testing.T) {
 		t.Fatalf("open actions: %d", opened)
 	}
 	a.path, a.source = "/tmp/demo.md", "# Hello\n\n**Markdown** document\n\n- item\n"
+	prepareTestReader(t, a)
 	tt.Frame()
 	if !tt.HasText("Hello") {
 		t.Fatal(tt.Texts())

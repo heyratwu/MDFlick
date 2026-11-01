@@ -17,6 +17,7 @@ func TestMermaidPreviewStates(t *testing.T) {
 	dark := diagramKey{code, true}
 	// An existing pending entry must stay pending across repeated builds.
 	a.diagrams[light] = nil
+	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 480, 600)
 	tt.Frame()
 	if !tt.HasText("正在渲染 Mermaid 图表…") {

@@ -10,6 +10,7 @@ import (
 
 func TestReaderWideBlocks(t *testing.T) {
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/wide.md", source: "# Reading\n\n" + strings.Repeat("Readable prose with a comfortable line length. ", 15) + "\n\n```go\n" + strings.Repeat("long_code_", 30) + "\n```\n\n|" + strings.Repeat(" Column |", 12) + "\n|" + strings.Repeat(" --- |", 12) + "\n|" + strings.Repeat(" content |", 11) + " finalcell |" + "\n"}}
+	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 1600, 1000)
 	for _, width := range []int{1600, 2560, 900, 600, 1600} {
 		tt.SetSize(width, 1000)
@@ -29,6 +30,7 @@ func TestReaderWideBlocks(t *testing.T) {
 
 func TestReaderNestedCode(t *testing.T) {
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/nested.md", source: "# Reading\n\n> ```go\n> " + strings.Repeat("long_code_", 30) + "\n> ```\n"}}
+	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 1600, 1000)
 	r, _ := tt.Find("Reading")
 	code, ok := tt.Find("Code, go")
@@ -42,6 +44,7 @@ func TestWideTableKeepsReferences(t *testing.T) {
 	clicked := ""
 	a.resetMarkdown(context.Background(), a.path)
 	a.md.OnLink = func(url string) { clicked = url }
+	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 1600, 1000)
 	if err := tt.Click("Table link"); err != nil {
 		t.Fatal(err)
@@ -58,6 +61,7 @@ func TestWideTableKeepsReferences(t *testing.T) {
 
 func TestWideTableScrollsAtWindowEdge(t *testing.T) {
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/table.md", source: "# Reading\n\n|" + strings.Repeat(" Column |", 20) + "\n|" + strings.Repeat(" --- |", 20) + "\n|" + strings.Repeat(" content |", 19) + " finalcell |\n"}}
+	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 900, 1000)
 	before, ok := tt.Find("finalcell")
 	if !ok || before.X < 876 {
