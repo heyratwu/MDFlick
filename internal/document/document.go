@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -26,7 +27,13 @@ func Read(r io.Reader) (string, error) {
 	return string(b), nil
 }
 
-func Load(path string) (string, error) {
+func Load(path string) (string, error) { return LoadContext(context.Background(), path) }
+
+// LoadContext checks cancellation between reads; an active OS read cannot be interrupted.
+func LoadContext(ctx context.Context, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".md", ".markdown":
 	default:
@@ -44,5 +51,20 @@ func Load(path string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("请选择普通 Markdown 文件")
 	}
-	return Read(f)
+	return Read(contextReader{ctx, f})
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(p) > 64<<10 {
+		p = p[:64<<10]
+	}
+	return r.reader.Read(p)
 }

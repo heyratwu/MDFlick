@@ -11,7 +11,7 @@ import (
 
 func TestMermaidPreviewStates(t *testing.T) {
 	code := "flowchart LR\n A[中文] --> B[预览]\n"
-	a := &app{path: "/tmp/diagram.md", source: "```mermaid\n" + code + "```\n\n```go\nprintln(1)\n```", renderer: &diagramRenderer{}, diagrams: make(map[diagramKey]*diagramResult)}
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/diagram.md", source: "```mermaid\n" + code + "```\n\n```go\nprintln(1)\n```"}, md: &markdown.Options{}, renderer: &diagramRenderer{}, diagrams: make(map[diagramKey]*diagramResult)}
 	a.md.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock}
 	light := diagramKey{code, false}
 	dark := diagramKey{code, true}

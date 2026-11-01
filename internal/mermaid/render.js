@@ -35,6 +35,15 @@ window.mdflickPNG = async function(source, dark) {
     return {png: canvas.toDataURL('image/png').split(',')[1], width: w, height: h};
   } finally { holder.remove(); }
 };
+// EvalContext cancels the native wait, not JavaScript execution. Keep a timed
+// out PNG evaluation serialized with later ones until its DOM work settles.
+const renderPNG = window.mdflickPNG;
+let pngPending = Promise.resolve();
+window.mdflickPNG = function(source, dark) {
+  const result = pngPending.then(() => renderPNG(source, dark));
+  pngPending = result.catch(() => {});
+  return result;
+};
 // Quick Look keeps the original code if a diagram fails to render.
 window.mdflickReady = (async function() {
   const blocks = Array.from(document.querySelectorAll('pre.mermaid-source'));

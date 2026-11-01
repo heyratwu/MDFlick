@@ -7,7 +7,7 @@ import (
 
 func TestReaderStates(t *testing.T) {
 	opened := 0
-	a := &app{open: func() { opened++ }}
+	a := &readerWindow{open: func() { opened++ }}
 	tt := ui.NewTester(a.view, 900, 720)
 	if !tt.HasText("轻松阅读 Markdown") {
 		t.Fatal(tt.Texts())
@@ -51,8 +51,8 @@ func TestReaderStates(t *testing.T) {
 }
 
 func TestAssignHome(t *testing.T) {
-	home := &app{}
-	manager := &app{windows: map[string]*app{"": home}}
+	home := &readerWindow{}
+	manager := &application{windows: map[string]*readerWindow{"": home}}
 	if !manager.assignHome(home, "/tmp/first.md") {
 		t.Fatal("welcome window was not reused")
 	}
@@ -65,7 +65,7 @@ func TestAssignHome(t *testing.T) {
 	if manager.assignHome(nil, "/tmp/second.md") {
 		t.Fatal("missing window accepted")
 	}
-	closed := &app{closed: true}
+	closed := &readerWindow{documentSession: documentSession{closed: true}}
 	manager.windows[""] = closed
 	if manager.assignHome(closed, "/tmp/second.md") {
 		t.Fatal("closed window accepted")

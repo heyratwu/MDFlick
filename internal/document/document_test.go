@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,5 +41,27 @@ func TestReadLimits(t *testing.T) {
 	}
 	if got, err := Read(strings.NewReader("")); got != "" || err != nil {
 		t.Fatalf("empty: %q %v", got, err)
+	}
+}
+
+func TestCancelledLoad(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := LoadContext(ctx, "missing.md"); err != context.Canceled {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestCancelBetweenReads(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := contextReader{ctx, strings.NewReader(strings.Repeat("a", 128<<10))}
+	b := make([]byte, 128<<10)
+	n, err := r.Read(b)
+	if err != nil || n != 64<<10 {
+		t.Fatalf("unbounded read: %d %v", n, err)
+	}
+	cancel()
+	if _, err := r.Read(b); err != context.Canceled {
+		t.Fatalf("got %v", err)
 	}
 }

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"image"
 	"sync"
 	"time"
 
@@ -22,15 +25,16 @@ type diagramResult struct {
 	image ui.ImageSource
 	width float32
 	err   error
+	bytes int64
 }
 
 // Each window owns one hidden WebView. All diagrams share its offline runtime,
-// and the mutex serializes Mermaid's global configuration and DOM operations.
+// and one worker serializes Mermaid's global configuration and DOM operations.
 type diagramRenderer struct {
 	web    *mygo.WebView
 	ready  chan struct{}
 	once   sync.Once
-	mu     sync.Mutex
+	jobs   chan diagramJob
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -41,7 +45,8 @@ func newDiagramRenderer(win *mygo.Window) (*diagramRenderer, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &diagramRenderer{web: web, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+	r := &diagramRenderer{web: web, ready: make(chan struct{}), ctx: ctx, cancel: cancel, jobs: make(chan diagramJob, 16)}
+	go r.work()
 	web.Page().OnDidFinishLoad(func() {
 		go func() {
 			ctx, cancel := context.WithTimeout(r.ctx, 15*time.Second)
@@ -64,11 +69,10 @@ func newDiagramRenderer(win *mygo.Window) (*diagramRenderer, error) {
 
 func (r *diagramRenderer) close() { r.cancel(); r.web.Destroy() }
 
-func (r *diagramRenderer) render(key diagramKey) diagramResult {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	ctx, cancel := context.WithTimeout(r.ctx, 15*time.Second)
-	defer cancel()
+func (r *diagramRenderer) render(ctx context.Context, key diagramKey) diagramResult {
+	if err := ctx.Err(); err != nil {
+		return diagramResult{err: err}
+	}
 	select {
 	case <-r.ready:
 	case <-ctx.Done():
@@ -91,11 +95,19 @@ func (r *diagramRenderer) render(key diagramKey) diagramResult {
 	if err != nil {
 		return diagramResult{err: err}
 	}
-	image, err := ui.DecodeImage(png)
-	return diagramResult{image: image, width: result.Width, err: err}
+	config, _, err := image.DecodeConfig(bytes.NewReader(png))
+	if err != nil {
+		return diagramResult{err: err}
+	}
+	pixels := int64(config.Width) * int64(config.Height)
+	if pixels <= 0 || pixels > maxImagePixels {
+		return diagramResult{err: errors.New("图表尺寸过大")}
+	}
+	bitmap, err := ui.DecodeImage(png)
+	return diagramResult{image: bitmap, width: result.Width, err: err, bytes: pixels * 4}
 }
 
-func (a *app) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
+func (a *readerWindow) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
 	if b.Open || a.renderer == nil {
 		markdown.DefaultCodeBlock(c, b)
 		return
@@ -103,20 +115,28 @@ func (a *app) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
 	key := diagramKey{b.Code(), c.Theme().Dark}
 	result, exists := a.diagrams[key]
 	if !exists {
-		// A guarded job is started only once per source and appearance. Publish
-		// exclusively through Window.Update; never retain Context or block views.
+		// Admission limits avoid both unbounded metadata and cache eviction/re-render
+		// loops when every Markdown block is constructed again on each frame.
+		if len(a.diagrams) >= 128 {
+			markdown.DefaultCodeBlock(c, b)
+			return
+		}
+		renderer, generation, win := a.renderer, a.generation, a.win
 		a.diagrams[key] = nil
-		renderer, generation := a.renderer, a.generation
-		go func() {
-			rendered := renderer.render(key)
-			a.win.Update(func() {
-				if a.closed || a.generation != generation || a.renderer != renderer {
+		accepted := renderer.submit(key, func(rendered diagramResult) {
+			win.Update(func() {
+				if !a.accepts(generation) || a.renderer != renderer {
 					return
 				}
-				a.diagrams[key] = &rendered
+				a.storeDiagram(key, rendered)
 			})
-		}()
+		})
+		if !accepted {
+			a.diagrams[key] = &diagramResult{err: errors.New("图表渲染队列已满，重新载入可重试")}
+		}
+		result = a.diagrams[key]
 	}
+
 	if result == nil {
 		ui.Text(c, "正在渲染 Mermaid 图表…").TextColor(c.Theme().TextMuted)
 		markdown.DefaultCodeBlock(c, b)
@@ -133,4 +153,58 @@ func (a *app) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
 		b.CopyButton(c)
 	})
 	ui.Image(c, result.image).Width(result.width).MaxWidthPercent(100).Label("Mermaid 图表").Role(ui.RoleImage)
+}
+
+const diagramCacheBudget int64 = 64 << 20
+
+type diagramJob struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	key    diagramKey
+	done   func(diagramResult)
+}
+
+// Deadlines include queue time. One worker owns Mermaid's global DOM state.
+func (r *diagramRenderer) submit(key diagramKey, done func(diagramResult)) bool {
+	ctx, cancel := context.WithTimeout(r.ctx, 15*time.Second)
+	job := diagramJob{ctx, cancel, key, done}
+	if r.ctx.Err() != nil {
+		cancel()
+		return false
+	}
+	select {
+	case r.jobs <- job:
+		return true
+	default:
+		cancel()
+		return false
+	}
+}
+func (r *diagramRenderer) work() {
+	for {
+		select {
+		case <-r.ctx.Done():
+			for {
+				select {
+				case job := <-r.jobs:
+					job.cancel()
+				default:
+					return
+				}
+			}
+		case job := <-r.jobs:
+			result := r.render(job.ctx, job.key)
+			job.cancel()
+			if r.ctx.Err() == nil {
+				job.done(result)
+			}
+		}
+	}
+}
+func (a *readerWindow) storeDiagram(key diagramKey, result diagramResult) {
+	if result.bytes > diagramCacheBudget-a.diagramBytes {
+		result = diagramResult{err: errors.New("图表缓存已达内存上限，显示源码")}
+	}
+	a.diagramBytes += result.bytes
+	a.diagrams[key] = &result
 }
