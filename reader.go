@@ -116,6 +116,6 @@ func (a *readerWindow) resetRenderer() {
 func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
 	a.md = &markdown.Options{
 		Code:      map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock},
-		LoadImage: localImages(ctx, filepath.Dir(path)),
+		LoadImage: documentImages(ctx, filepath.Dir(path)),
 	}
 }
