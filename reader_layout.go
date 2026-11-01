@@ -101,21 +101,7 @@ type readerTableState struct {
 
 func readerTableMarkdown(d *parser.Document, i int) string {
 	b := d.Block(i)
-	// Keep reference definitions available to links inside the table.
-	var refs strings.Builder
-	end := 0
-	for j := range d.Children(0) {
-		block := d.Block(j)
-		gap := strings.TrimLeft(d.Source()[end:block.Start], " \t|>")
-		if parser.Parse(gap).Len() == 1 {
-			refs.WriteString(gap)
-			refs.WriteByte('\n')
-		}
-		end = block.End
-	}
-	if gap := strings.TrimLeft(d.Source()[end:], " \t|>"); parser.Parse(gap).Len() == 1 {
-		refs.WriteString(gap)
-	}
+	refs := readerReferences(d)
 	// Rebuild rows from cell source ranges to remove list/quote prefixes.
 	var table strings.Builder
 	for row := range d.Children(i) {
@@ -143,5 +129,24 @@ func readerTableMarkdown(d *parser.Document, i int) string {
 			table.WriteByte('\n')
 		}
 	}
-	return table.String() + "\n" + refs.String()
+	return table.String() + "\n" + refs
+}
+
+func readerReferences(d *parser.Document) string {
+	// Keep reference definitions available to blocks rendered in nested views.
+	var refs strings.Builder
+	end := 0
+	for j := range d.Children(0) {
+		block := d.Block(j)
+		gap := strings.TrimLeft(d.Source()[end:block.Start], " \t|>")
+		if parser.Parse(gap).Len() == 1 {
+			refs.WriteString(gap)
+			refs.WriteByte('\n')
+		}
+		end = block.End
+	}
+	if gap := strings.TrimLeft(d.Source()[end:], " \t|>"); parser.Parse(gap).Len() == 1 {
+		refs.WriteString(gap)
+	}
+	return refs.String()
 }

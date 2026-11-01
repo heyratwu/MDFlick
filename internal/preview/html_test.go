@@ -65,3 +65,15 @@ func TestSharedCorpus(t *testing.T) {
 		})
 	}
 }
+
+func TestHTMLContainerAlignment(t *testing.T) {
+	got := HTML("<div align=\"center\" onclick=\"alert(1)\">\n\n# 乔木剪藏 · Qiaomu Clipper\n\n**中文** | [English](#english)\n\n</div>\n\nOutside\n\n```html\n<div align=\"center\">literal</div>\n```\n")
+	for _, want := range []string{`<div align="center">`, `<h1>乔木剪藏 · Qiaomu Clipper</h1>`, `<strong>中文</strong>`, `href="#english"`, `&lt;div align=&#34;center&#34;&gt;literal&lt;/div&gt;`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %s", want, got)
+		}
+	}
+	if strings.Contains(got, "onclick") || strings.Contains(got, "alert(1)") {
+		t.Fatal("active HTML survived sanitization")
+	}
+}

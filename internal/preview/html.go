@@ -55,7 +55,7 @@ func HTML(source string) string {
 			return
 		}
 		clean := &html.Node{Type: html.ElementNode, Data: n.Data, DataAtom: n.DataAtom}
-		// Only parser code blocks receive a marker; raw HTML stays escaped.
+		// Only fenced Markdown code blocks receive a Mermaid marker.
 		if n.Data == "pre" && n.FirstChild != nil && n.FirstChild.Data == "code" {
 			if codeIndex < len(codeBlocks) && codeBlocks[codeIndex] {
 				clean.Attr = append(clean.Attr, html.Attribute{Key: "class", Val: "mermaid-source"})
@@ -64,6 +64,11 @@ func HTML(source string) string {
 		}
 		for _, a := range n.Attr {
 			switch a.Key {
+			case "align":
+				align := strings.ToLower(strings.TrimSpace(a.Val))
+				if align == "left" || align == "center" || align == "right" {
+					clean.Attr = append(clean.Attr, html.Attribute{Key: "align", Val: align})
+				}
 			case "alt", "title", "colspan", "rowspan", "start", "checked":
 				clean.Attr = append(clean.Attr, a)
 			case "href":
