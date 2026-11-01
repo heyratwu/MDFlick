@@ -109,7 +109,7 @@ func (r *diagramRenderer) render(ctx context.Context, key diagramKey) diagramRes
 
 func (a *readerWindow) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
 	if b.Open || a.renderer == nil {
-		markdown.DefaultCodeBlock(c, b)
+		a.codeBlock(c, b)
 		return
 	}
 	key := diagramKey{b.Code(), c.Theme().Dark}
@@ -118,7 +118,7 @@ func (a *readerWindow) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
 		// Admission limits avoid both unbounded metadata and cache eviction/re-render
 		// loops when every Markdown block is constructed again on each frame.
 		if len(a.diagrams) >= 128 {
-			markdown.DefaultCodeBlock(c, b)
+			a.codeBlock(c, b)
 			return
 		}
 		renderer, generation, win := a.renderer, a.generation, a.win
@@ -136,12 +136,12 @@ func (a *readerWindow) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
 
 	if result == nil {
 		ui.Text(c, "正在渲染 Mermaid 图表…").TextColor(c.Theme().TextMuted)
-		markdown.DefaultCodeBlock(c, b)
+		a.codeBlock(c, b)
 		return
 	}
 	if result.err != nil {
 		ui.Text(c, "Mermaid 图表无法渲染，显示源码").TextColor(c.Theme().TextMuted).Tooltip(fmt.Sprint(result.err))
-		markdown.DefaultCodeBlock(c, b)
+		a.codeBlock(c, b)
 		return
 	}
 	ui.Row(c).AlignItems(ui.Center).Children(func() {

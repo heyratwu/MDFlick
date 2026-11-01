@@ -20,6 +20,7 @@ type readerWindow struct {
 	renderer     *diagramRenderer
 	diagrams     map[diagramKey]*diagramResult
 	diagramBytes int64
+	blockIndent  float32
 	open         func()
 }
 
@@ -49,8 +50,11 @@ func (a *readerWindow) view(c *ui.Context) {
 				a.md = &markdown.Options{}
 			}
 			a.md.Theme = readerTheme(t.Dark)
+			a.md.CodeBlock = a.codeBlock
+			a.md.Block = a.wideBlock
+			left, prose, _ := readerWidths(c)
 			ui.Scroll(c).Key(a.path).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
-				ui.Column(c).WidthPercent(100).MaxWidth(860).AlignSelf(ui.Center).Padding(40, 72, 120, 72).FontWeight(400).Children(func() {
+				ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(40, 0, 120, 0).FontWeight(400).Children(func() {
 					markdown.View(c, a.source, a.md)
 					if a.source == "" {
 						ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted)
