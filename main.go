@@ -1,11 +1,17 @@
 package main
 
 import (
+	"context"
 	"github.com/egoist/mygo"
 	"log"
+	"mdflick/internal/diagnostics"
+	"time"
 )
 
 func main() {
+	started := time.Now()
+	diagnostics.Memory("native.main")
+	mygo.App.OnReady(func() { diagnostics.Record(context.Background(), "native.main-to-ready", started, 0) })
 	configureReaderTextRendering()
 	manager := &application{windows: make(map[string]*readerWindow)}
 	mygo.App.SetName("MDFlick")

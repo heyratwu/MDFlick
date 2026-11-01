@@ -5,6 +5,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"log"
 	"path/filepath"
+	"time"
 )
 
 type application struct {
@@ -43,10 +44,14 @@ func (manager *application) openDialog(target *readerWindow) {
 	}()
 }
 func (manager *application) newWindow(path string) *readerWindow {
+	return manager.newWindowAt(path, time.Now())
+}
+
+func (manager *application) newWindowAt(path string, openedAt time.Time) *readerWindow {
 	if manager.resources == nil {
 		manager.resources = newApplicationResources()
 	}
-	a := &readerWindow{documentSession: documentSession{path: path}, resources: manager.resources}
+	a := &readerWindow{documentSession: documentSession{path: path}, resources: manager.resources, openStarted: openedAt}
 	a.open = func() { manager.openDialog(a) }
 	title := "MDFlick"
 	if path != "" {
@@ -71,6 +76,7 @@ func (manager *application) newWindow(path string) *readerWindow {
 	return a
 }
 func (manager *application) openPath(path string, target *readerWindow) {
+	openedAt := time.Now()
 	if target == nil {
 		target = manager.windows[""]
 	}
@@ -88,10 +94,11 @@ func (manager *application) openPath(path string, target *readerWindow) {
 		return
 	}
 	if manager.assignHome(target, absolute) {
+		target.openStarted = openedAt
 		target.win.SetTitle(filepath.Base(absolute) + " — MDFlick")
 		target.load()
 		target.win.Invalidate()
 		return
 	}
-	manager.newWindow(absolute)
+	manager.newWindowAt(absolute, openedAt)
 }

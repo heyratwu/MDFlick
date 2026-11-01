@@ -3,7 +3,7 @@ package diagnostics
 import (
 	"context"
 	"log"
-	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,6 +13,14 @@ type Event struct {
 	Bytes   int
 }
 type observerKey struct{}
+type requestKey struct{}
+
+var nextRequest atomic.Uint64
+
+// WithRequest correlates all stages of one open/reload without logging paths.
+func WithRequest(ctx context.Context) context.Context {
+	return context.WithValue(ctx, requestKey{}, nextRequest.Add(1))
+}
 
 func WithObserver(ctx context.Context, observer func(Event)) context.Context {
 	return context.WithValue(ctx, observerKey{}, observer)
@@ -22,7 +30,8 @@ func Record(ctx context.Context, stage string, started time.Time, bytes int) {
 	if observer, ok := ctx.Value(observerKey{}).(func(Event)); ok {
 		observer(event)
 	}
-	if os.Getenv("MDFLICK_TRACE") == "1" {
-		log.Printf("pipeline stage=%s elapsed=%s bytes=%d", event.Stage, event.Elapsed, event.Bytes)
+	if Enabled() {
+		id, _ := ctx.Value(requestKey{}).(uint64)
+		log.Printf("pipeline request=%d stage=%s elapsed=%s bytes=%d", id, event.Stage, event.Elapsed, event.Bytes)
 	}
 }

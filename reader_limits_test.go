@@ -17,9 +17,6 @@ func TestNativeProcessingLimits(t *testing.T) {
 		{"input-blocks", "a\n\nb\n\nc", func(l *document.ProcessingLimits) { l.Blocks = 3 }},
 		{"converted-blocks", "<div><p>a</p><p>b</p><p>c</p></div>", func(l *document.ProcessingLimits) { l.Blocks = 3 }},
 		{"converted-bytes", "<hr><hr><hr><hr>", func(l *document.ProcessingLimits) { l.ConvertedBytes = 18 }},
-		{"aggregate-fragments", "# One\n\n# Two", func(l *document.ProcessingLimits) { l.FragmentBytes = 10 }},
-		{"table-fragment", "| Column |\n|---|\n| value |", func(l *document.ProcessingLimits) { l.FragmentBytes = 8 }},
-		{"reference-expansion", "# [r]\n\n[r]: https://example.com/a-long-destination", func(l *document.ProcessingLimits) { l.FragmentBytes = 16 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			limits := document.NativeLimits()
@@ -28,7 +25,7 @@ func TestNativeProcessingLimits(t *testing.T) {
 			if err != document.ResourceLimit {
 				t.Fatalf("expected resource limit, got %v", err)
 			}
-			if prepared.markdown != "" || len(prepared.prose) != 0 || len(prepared.tables) != 0 {
+			if prepared.markdown != "" || prepared.parsed != nil {
 				t.Fatal("partial document returned")
 			}
 		})
@@ -41,7 +38,7 @@ func TestNativeProcessingLimits(t *testing.T) {
 }
 
 func TestNativeCancelAtStageBoundaries(t *testing.T) {
-	for _, stage := range []string{"native.parse", "native.html", "native.fragments"} {
+	for _, stage := range []string{"native.parse", "native.html", "native.inlines"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -53,7 +50,7 @@ func TestNativeCancelAtStageBoundaries(t *testing.T) {
 				}
 			})
 			result, err := prepareReaderDocument(ctx, "<div align=center>\n\n# [Title][r]\n\n</div>\n\n[r]: https://example.com")
-			if !reached || err != context.Canceled || result.markdown != "" || len(result.prose) != 0 {
+			if !reached || err != context.Canceled || result.markdown != "" || result.parsed != nil {
 				t.Fatalf("cancel at %s: %+v %v", stage, result, err)
 			}
 		})

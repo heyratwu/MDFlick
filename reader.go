@@ -25,6 +25,8 @@ type readerWindow struct {
 	blockIndent float32
 	html        readerHTMLState
 	open        func()
+	performance readerPerformance
+	openStarted time.Time
 }
 
 func (a *readerWindow) view(c *ui.Context) {
@@ -50,21 +52,21 @@ func (a *readerWindow) view(c *ui.Context) {
 				})
 			})
 		} else {
+			a.observePresentation(c)
 			if a.md == nil {
 				a.md = &markdown.Options{}
 			}
 			a.md.Theme = readerTheme(t.Dark)
 			a.md.CodeBlock = a.codeBlock
-			a.md.Block = a.readerBlock
+			a.md.BlockStyle = a.readerBlockStyle
 			a.md.OnLink = a.linkHandler(c)
-			source := a.prepared.markdown
 			left, prose, _ := readerWidths(c)
 			ui.Scroll(c).Key(struct {
 				Path       string
 				Generation uint64
 			}{a.path, a.generation}).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
 				ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(40, 0, 120, 0).FontWeight(400).Children(func() {
-					markdown.View(c, source, a.md)
+					markdown.ViewDocument(c, a.prepared.parsed, a.md)
 					if a.source == "" {
 						ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted)
 					}
@@ -82,7 +84,17 @@ func (a *readerWindow) load() {
 		a.resources = newApplicationResources()
 	}
 	resources := a.resources
+	started := a.openStarted
+	if started.IsZero() {
+		started = time.Now()
+	}
+	a.openStarted = time.Time{}
 	ctx, generation := a.beginLoad()
+	a.performance = readerPerformance{}
+	if diagnostics.Enabled() {
+		ctx = diagnostics.WithRequest(ctx)
+		a.performance = readerPerformance{ctx: ctx, started: started}
+	}
 	path, win := a.path, a.win
 	a.closeDiagrams()
 	a.releaseImages()
@@ -98,6 +110,7 @@ func (a *readerWindow) load() {
 			if err != nil {
 				return
 			}
+			diagnostics.Record(ctx, "native.open-to-publish", started, len(source))
 			a.html = readerHTMLState{}
 			a.resetMarkdown(ctx, path)
 			if prepared.hasMermaid && document.NativePolicy().Mermaid {
@@ -123,6 +136,8 @@ func (a *readerWindow) close() {
 	a.documentSession.close()
 	a.releaseImages()
 	a.closeDiagrams()
+	a.resources.record("native.closed")
+	diagnostics.Memory("native.closed")
 }
 
 // New options own a new image cache; never copy Options' internal sync.Map.

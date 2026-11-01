@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui/markdown/parser"
@@ -11,13 +9,13 @@ import (
 	"mdflick/internal/document"
 )
 
-// preparedReaderDocument is built by the load worker and read only after
-// publication. Offsets and fragments all refer to markdown, not the raw source.
+// The worker exclusively owns parsed until publication. Afterwards the UI owns
+// it: MyGo's lazy inline caches make parser.Document mutable, even when displayed
+// as read-only. Never share a published parse with a worker or another window.
 type preparedReaderDocument struct {
 	markdown   string
+	parsed     *parser.Document
 	ranges     []document.HTMLAlignment
-	tables     map[int]string
-	prose      map[int]string
 	hasMermaid bool
 }
 
@@ -69,104 +67,21 @@ func prepareReaderDocumentWithLimits(parent context.Context, source string, limi
 		}
 	}
 	started = time.Now()
-	remaining := limit.FragmentBytes
-	result.tables = make(map[int]string)
-	result.prose = make(map[int]string)
+	// Warm the inline caches in the worker. Rendering may read them on the UI
+	// thread only after the whole document has passed cancellation checks.
 	for i := 1; i < parsed.Len(); i++ {
 		if err := ctx.Err(); err != nil {
 			return preparedReaderDocument{}, err
 		}
-		b := parsed.Block(i)
-		k := sort.Search(len(result.ranges), func(k int) bool { return result.ranges[k].End > b.Start })
-		aligned := k < len(result.ranges) && result.ranges[k].Start <= b.Start
-		if b.Kind != parser.Table && b.Kind != parser.Heading && !(b.Kind == parser.Paragraph && aligned) {
-			continue
+		switch parsed.Block(i).Kind {
+		case parser.Paragraph, parser.Heading, parser.TableCell:
+			parsed.Inlines(i)
 		}
-		if b.End-b.Start > remaining {
-			return preparedReaderDocument{}, document.ResourceLimit
-		}
-		refs, err := fragmentReferences(ctx, parsed, i, remaining)
-		if err != nil {
-			return preparedReaderDocument{}, err
-		}
-		var fragment string
-		if b.Kind == parser.Table {
-			fragment, err = readerTableMarkdownContext(ctx, parsed, i, refs, remaining)
-			if err != nil {
-				return preparedReaderDocument{}, err
-			}
-			result.tables[b.Start] = fragment
-		} else {
-			size := b.End - b.Start + 2 + len(refs)
-			if size > remaining {
-				return preparedReaderDocument{}, document.ResourceLimit
-			}
-			fragment = result.markdown[b.Start:b.End] + "\n\n" + refs
-			result.prose[b.Start] = fragment
-		}
-		remaining -= len(fragment)
 	}
-	diagnostics.Record(ctx, "native.fragments", started, limit.FragmentBytes-remaining)
+	diagnostics.Record(ctx, "native.inlines", started, len(result.markdown))
 	if err := ctx.Err(); err != nil {
 		return preparedReaderDocument{}, err
 	}
+	result.parsed = parsed
 	return result, nil
-}
-
-// Rebuild cells without list/quote prefixes, with bounded writes and cancellation.
-func readerTableMarkdownContext(ctx context.Context, d *parser.Document, i int, refs string, remaining int) (string, error) {
-	b := d.Block(i)
-	var table strings.Builder
-	var failure error
-	write := func(s string) {
-		if failure != nil {
-			return
-		}
-		if err := ctx.Err(); err != nil {
-			failure = err
-			return
-		}
-		if len(s) > remaining-table.Len() {
-			failure = document.ResourceLimit
-			return
-		}
-		table.WriteString(s)
-	}
-	for row := range d.Children(i) {
-		if failure != nil {
-			return "", failure
-		}
-		write("|")
-		for cell := range d.Children(row) {
-			if failure != nil {
-				return "", failure
-			}
-			cb := d.Block(cell)
-			write(d.Source()[cb.Start:cb.End])
-			write("|")
-		}
-		write("\n")
-		if d.Block(row).Header {
-			write("|")
-			for _, align := range b.Align {
-				switch align {
-				case parser.AlignCenter:
-					write(":---:|")
-				case parser.AlignRight:
-					write("---:|")
-				case parser.AlignLeft:
-					write(":---|")
-				default:
-					write("---|")
-				}
-			}
-			write("\n")
-		}
-	}
-	write("\n")
-	write(refs)
-	if failure != nil {
-		return "", failure
-	}
-	return table.String(), ctx.Err()
 }

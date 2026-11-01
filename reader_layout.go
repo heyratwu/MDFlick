@@ -62,9 +62,9 @@ type readerCodeSize struct {
 	width  float32
 }
 
-// MyGo's table renderer owns its horizontal scroll view. Give that view the
-// available right-hand space without widening the surrounding prose.
-func (a *readerWindow) wideBlock(c *ui.Context, d *parser.Document, i int) bool {
+// Configure the original block container. Tables retain the full document's
+// references, selection and copy handlers instead of creating nested views.
+func (a *readerWindow) styleWideBlock(c *ui.Context, d *parser.Document, i int, box ui.Element) {
 	b := d.Block(i)
 	a.blockIndent = 0
 	for parent := b.Parent; parent > 0; parent = d.Block(parent).Parent {
@@ -75,23 +75,8 @@ func (a *readerWindow) wideBlock(c *ui.Context, d *parser.Document, i int) bool 
 			a.blockIndent += a.md.Theme.QuoteBarWidth + 16*.85
 		}
 	}
-	if b.Kind != parser.Table {
-		return false
+	if b.Kind == parser.Table {
+		_, _, wide := readerWidths(c)
+		box.Width(max(0, wide-a.blockIndent))
 	}
-	_, _, wide := readerWidths(c)
-	box := ui.Column(c).Width(max(0, wide-a.blockIndent))
-	state := *ui.Local(box, readerTableKey{}, func() *readerTableState { return &readerTableState{} })
-	state.markdown = a.prepared.tables[b.Start]
-	state.options.Theme = a.md.Theme
-	state.options.OnLink = a.md.OnLink
-	state.options.LoadImage = a.md.LoadImage
-	state.options.Extensions = d.Extensions()
-	box.Children(func() { markdown.View(c, state.markdown, &state.options) })
-	return true
-}
-
-type readerTableKey struct{}
-type readerTableState struct {
-	markdown string
-	options  markdown.Options
 }

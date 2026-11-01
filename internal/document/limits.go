@@ -16,12 +16,12 @@ const (
 // ProcessingLimits bounds derived representations separately from input size.
 // Parser calls remain synchronous; cancellation is checked at stage boundaries.
 type ProcessingLimits struct {
-	Blocks, ConvertedBytes, FragmentBytes int
-	Timeout                               time.Duration
+	Blocks, ConvertedBytes int
+	Timeout                time.Duration
 }
 
 func NativeLimits() ProcessingLimits {
-	return ProcessingLimits{Blocks: MaxBlocks, ConvertedBytes: MaxDerivedSize, FragmentBytes: MaxDerivedSize, Timeout: ProcessingTimeout}
+	return ProcessingLimits{Blocks: MaxBlocks, ConvertedBytes: MaxDerivedSize, Timeout: ProcessingTimeout}
 }
 func QuickLookLimits() ProcessingLimits {
 	return ProcessingLimits{Blocks: MaxBlocks, ConvertedBytes: MaxDerivedSize, Timeout: ProcessingTimeout}

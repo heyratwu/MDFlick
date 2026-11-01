@@ -4,12 +4,14 @@ import WebKit
 import OSLog
 
 @objc(PreviewViewController)
-final class PreviewViewController: NSViewController, QLPreviewingController, WKNavigationDelegate {
+final class PreviewViewController: NSViewController, QLPreviewingController, WKNavigationDelegate, WKScriptMessageHandler {
     private var webView: WKWebView!
     private var generation = 0
     private var activeRequest: PreviewRequest?
     private var activeNavigation: WKNavigation?
     private var loadStarted: TimeInterval = 0
+    private var requestStarted: TimeInterval = 0
+    private var frameReported = false
     // Only one Go renderer runs at a time; obsolete queued requests exit early.
     private let renderQueue = DispatchQueue(label: "com.mdflick.preview", qos: .userInitiated)
 
@@ -21,6 +23,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         // Generated HTML authorizes only the bundled Mermaid scripts by CSP
         // hash. Markdown content remains escaped and network loads blocked.
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        config.userContentController.add(WeakPreviewMessageHandler(self), name: "mdflickFrame")
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 640), configuration: config)
         webView.navigationDelegate = self
         view = webView
@@ -35,6 +38,13 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         webView.stopLoading()
         activeNavigation = nil
         let queuedAt = ProcessInfo.processInfo.systemUptime
+        requestStarted = queuedAt
+        frameReported = false
+        webView.configuration.userContentController.removeAllUserScripts()
+        // Two animation frames mark a rendering opportunity after the body is
+        // available, not physical presentation. Each message belongs to a request.
+        let frameScript = "requestAnimationFrame(() => requestAnimationFrame(() => window.webkit.messageHandlers.mdflickFrame.postMessage(\(request))))"
+        webView.configuration.userContentController.addUserScript(WKUserScript(source: frameScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         let token = PreviewRequest()
         activeRequest = token
         renderQueue.async { [weak self] in
@@ -75,6 +85,13 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         }
     }
 
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, let request = message.body as? Int,
+              request == generation, activeNavigation != nil, !frameReported else { return }
+        frameReported = true
+        logger.debug("Preview request=\(request, privacy: .public) open-to-frame-opportunity: \(ProcessInfo.processInfo.systemUptime - self.requestStarted, privacy: .public)s")
+    }
+
     // Only generated content and same-document anchors may navigate.
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let url = action.request.url
@@ -99,4 +116,13 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         }
     }
 
+}
+
+// WKUserContentController retains handlers; avoid retaining the controller/view.
+private final class WeakPreviewMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var target: PreviewViewController?
+    init(_ target: PreviewViewController) { self.target = target }
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        target?.userContentController(controller, didReceive: message)
+    }
 }

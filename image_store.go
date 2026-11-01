@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"mdflick/internal/diagnostics"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"mdflick/internal/document"
@@ -153,6 +155,11 @@ func (s *imageStore) load(source string) (ui.ImageSource, error) {
 }
 
 func (s *imageStore) loadOnce(key string) (ui.ImageSource, error) {
+	started := time.Now()
+	defer func() {
+		diagnostics.Record(s.ctx, "native.image-load-decode", started, 0)
+		diagnostics.Memory("native.image-load-decode")
+	}()
 	if err := acquireImageSlot(s.ctx, s.slots); err != nil {
 		return nil, err
 	}

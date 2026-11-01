@@ -8,7 +8,7 @@
 | `applicationResources` | 文档加载槽位、图表执行槽位、图表缓存总预算与图片资源 | 应用 |
 | `readerWindow` | 原生窗口、布局、链接交互、展示配置与资源服务的装配 | 窗口 |
 | `documentSession` | 加载版本、取消、原文与预处理快照的统一发布 | 窗口内文档 |
-| `preparedReaderDocument` | 转换后的 Markdown、对齐区间、引用已解析的表格/段落片段、Mermaid 判定 | 文档版本，只读 |
+| `preparedReaderDocument` | 转换后的 Markdown、预解析文档、对齐区间、Mermaid 判定 | 文档版本；从 worker 独占移交 UI |
 | `diagramService` | 图表准入、去重、结果状态、缓存预算、关闭后拒绝结果发布 | 文档版本 |
 | `diagramRenderer` | 隐藏 WebView、串行 worker、排队期限、PNG 解码 | 图表服务 |
 | `imageStore` | 跨 Markdown 区域共享图片、取消、文档预算 | 文档版本 |
@@ -22,9 +22,11 @@
 
 ## 原生预处理边界
 
-原文只在首次解析时创建语法树，HTML 转换复用它；仅转换结果发生变化时再解析转换后的 Markdown。标题、表格和对齐段落从已解析 inline 的目标与标题恢复所需引用定义，覆盖完整、折叠、快捷、图片和嵌套图片引用，不再逐片段附加全文引用定义，也不再解析块间空隙。
+原文首次解析后，HTML 转换复用语法树；仅转换结果发生变化时再解析转换后的 Markdown。最终文档的段落、标题和表格单元格 inline 在 worker 中预热，检查取消后将整份 `parser.Document` 独占移交 UI 线程。解析器仍有可变缓存，发布后 worker 不再访问，不跨窗口或 Markdown 视图共享。
 
-`internal/document.ProcessingLimits` 统一限制机制，原生与 Quick Look 分别返回默认策略。原生加载从等待应用槽位开始计时，最多 15 秒；原文和转换后的解析结果均最多 20,000 块，转换后 Markdown 最多 64 MiB，所有派生片段（含引用定义）合计最多 64 MiB。HTML token 遍历、表格重建、引用生成和片段遍历均检查取消；有界写入在扩充输出前检查额度。失败返回稳定错误码且不发布部分快照。预处理期限与文档资源生命周期分离，成功加载后的图片不会因该期限到期而被取消。
+MyGo 本地 `ViewDocument` API 采用该文档；`BlockStyle` 直接配置标题、对齐段落和宽表格的原始块容器。原先的表格/段落片段生成、引用定义恢复和嵌套 Markdown 视图已移除。全文选择、复制和链接路由都在同一视图内处理。具体框架补丁及重新生成 vendor 的方式见 [MyGo 本地补丁](mygo-patches.md)。
+
+`internal/document.ProcessingLimits` 统一限制机制。原生加载从等待应用槽位开始计时，最多 15 秒；原文和转换后的解析结果均最多 20,000 块，转换后 Markdown 最多 64 MiB。HTML token 遍历及块间 inline 预热检查取消；不发布部分文档。已无派生 Markdown 片段，因此删除片段总字节限制。预处理期限与成功加载后的图片生命周期分离。
 
 期限是协作式的：单次 parser 调用、inline 解析和系统文件读取不能被硬中断；块数在解析完成后检查。这些限制不保证峰值 RSS 或 GPU 占用。
 

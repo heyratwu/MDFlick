@@ -133,3 +133,25 @@ func TestWorkerSerializesAndExpiresQueuedJobs(t *testing.T) {
 		t.Fatal("worker did not stop")
 	}
 }
+
+func TestSessionReleasesPreparedDocument(t *testing.T) {
+	prepared, err := prepareReaderDocument(context.Background(), "# Old\n\nA paragraph.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &documentSession{prepared: prepared}
+	_, version := s.beginLoad()
+	if s.prepared.parsed != nil {
+		t.Fatal("reload retained the previous parse")
+	}
+	if !s.completePrepared(version, "# Old", prepared, nil) {
+		t.Fatal("current parse rejected")
+	}
+	s.close()
+	if s.prepared.parsed != nil {
+		t.Fatal("closed session retained parse ownership")
+	}
+	if s.completePrepared(version, "# Old", prepared, nil) {
+		t.Fatal("closed session adopted a late parse")
+	}
+}

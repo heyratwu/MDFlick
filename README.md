@@ -28,7 +28,7 @@ go test -race ./...
 bash scripts/test-macos-bridge.sh  # macOS：实际 Swift/C/Go 边界测试
 ```
 
-主窗口在后台读取并预处理文档，全应用最多两个任务并行，15 秒协作式期限包含排队时间；原文与转换后的解析结果各最多 20,000 块，转换后 Markdown 和派生片段总量分别最多 64 MiB。HTML 转换复用首次解析结果，片段仅携带实际使用的引用定义。主窗口将 HTML 转换结果、对齐区间、引用、表格片段和 Mermaid 判定作为同一版本的只读快照发布；UI 构建直接使用预处理结果，MyGo 自身仍负责原生 Markdown 的解析和布局。
+主窗口在后台读取并预处理文档，全应用最多两个任务并行，15 秒协作式期限包含排队时间；原文与转换后的解析结果各最多 20,000 块，转换后 Markdown 最多 64 MiB。HTML 转换复用首次解析结果；后台完成最终文档及 inline 解析后，将解析文档、对齐区间和 Mermaid 判定独占移交 UI 线程。正文、表格、标题和对齐段落使用同一个原生 Markdown 视图，不再重建 Markdown 片段或在首帧重复解析。MyGo 仍负责布局和绘制，暂未做长文虚拟化。本地框架 API 补丁与依赖更新方式见 [MyGo 本地补丁](docs/mygo-patches.md)。
 
 主窗口使用 `ui/markdown.View`，通过 `Options.Code["mermaid"]` 将图表交给隐藏的 WKWebView 异步生成高清图片，按源码和主题缓存，并保留复制源码按钮。Quick Look 使用同一 MyGo Markdown parser 生成经过过滤的 HTML，通过 Swift / WKWebView 展示；CSP 仅授权内置 Mermaid 脚本，不执行文档脚本、不请求网络资源。快速预览保留表格、代码和任务列表；代码按等宽字体显示，图片显示替代文字。完整窗口支持代码语法高亮、本地和网络图片。当前锁定的 MyGo 版本不自动处理相对文档链接。
 

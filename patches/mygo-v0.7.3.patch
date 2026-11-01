@@ -1,0 +1,146 @@
+--- a/vendor/github.com/egoist/mygo/ui/context.go
++++ b/vendor/github.com/egoist/mygo/ui/context.go
+@@ -92,6 +92,7 @@
+ }
+ 
+ func (c *context) reset(now time.Time, w, h float32) {
++	c.rt.afterPresent = nil
+ 	for _, f := range c.rt.focusFields {
+ 		clear(f.members)
+ 		f.members = f.members[:0]
+--- a/vendor/github.com/egoist/mygo/ui/runtime.go
++++ b/vendor/github.com/egoist/mygo/ui/runtime.go
+@@ -92,6 +92,7 @@
+ // the view function, lays them out, paints them and routes input to the
+ // elements of the last frame. Main thread only, except where noted.
+ type engine struct {
++	afterPresent []func()
+ 	// inlineRects is placeInline's scratch, kept from frame to frame.
+ 	inlineRects []text.Rect
+ 	// byPosition holds the keys whose press stood for its physical key
+@@ -714,6 +715,7 @@
+ 	rt.c.finish()
+ 	clear(rt.byID)
+ 	rt.stats.end(rt)
++	rt.notifyPresented()
+ }
+ 
+ // now returns the time, which a Tester sets (clock).
+@@ -907,6 +909,7 @@
+ 	rt.text.EndFrame()
+ 	rt.next()
+ 	rt.stats.end(rt)
++	rt.notifyPresented()
+ }
+ 
+ // endPass forgets the input the pass handled.
+--- /dev/null
++++ b/vendor/github.com/egoist/mygo/ui/presentation.go
+@@ -0,0 +1,22 @@
++package ui
++
++// AfterPresent runs fn once on the UI thread after this build's frame has been
++// submitted to the surface. Register during each build that needs a callback;
++// earlier passes in the same frame are discarded. It does not mean scanout or
++// that the user saw the pixels. Callbacks must not retain build elements.
++func (c *Context) AfterPresent(fn func()) {
++	if c.build() != nil && fn != nil {
++		c.rt.afterPresent = append(c.rt.afterPresent, fn)
++	}
++}
++
++func (rt *engine) notifyPresented() {
++	if h, ok := rt.host.(*windowHost); ok && h.framePath() == "" {
++		return
++	}
++	callbacks := rt.afterPresent
++	rt.afterPresent = nil
++	for _, fn := range callbacks {
++		fn()
++	}
++}
+--- a/vendor/github.com/egoist/mygo/ui/markdown/view.go
++++ b/vendor/github.com/egoist/mygo/ui/markdown/view.go
+@@ -58,6 +58,9 @@
+ 	// Block, when set, is asked first for each block, and builds it in
+ 	// its place when it returns true.
+ 	Block func(c *ui.Context, d *parser.Document, i int) bool
++	// BlockStyle configures a block container before its default contents are
++	// built. The element belongs to this build only; do not retain it.
++	BlockStyle func(c *ui.Context, d *parser.Document, i int, box ui.Element)
+ 
+ 	// Reveal is how Stream shows text as it comes: DefaultReveal when nil.
+ 	Reveal *Reveal
+@@ -88,7 +91,18 @@
+ //
+ //	markdown.View(c, app.readme, &app.md)
+ func View(c *ui.Context, src string, o *Options) ui.Element {
+-	return build(c, src, o, false)
++	return build(c, src, o, false, nil)
++}
++
++// ViewDocument adopts a finished parse, exclusively owned by this view on the
++// UI thread after publication. It must not be shared with another view or worker:
++// inline parsing is lazy and mutates Document. Do not edit it while mounted.
++// Replacing the pointer resets paragraph, code and table caches.
++func ViewDocument(c *ui.Context, d *parser.Document, o *Options) ui.Element {
++	if d == nil {
++		return View(c, "", o)
++	}
++	return build(c, d.Source(), o, false, d)
+ }
+ 
+ // Stream shows src, Markdown still being written, as a language model's
+@@ -105,7 +119,7 @@
+ //		markdown.Stream(c, msg.text, &app.md)
+ //	}
+ func Stream(c *ui.Context, src string, o *Options) ui.Element {
+-	return build(c, src, o, true)
++	return build(c, src, o, true, nil)
+ }
+ 
+ // stateKey keys a view's state among its root's.
+@@ -150,7 +164,7 @@
+ 
+ func newState() *viewState { return &viewState{scrollTo: -1} }
+ 
+-func build(c *ui.Context, src string, o *Options, streaming bool) ui.Element {
++func build(c *ui.Context, src string, o *Options, streaming bool, prepared *parser.Document) ui.Element {
+ 	if o == nil {
+ 		o = &defaultOptions
+ 	}
+@@ -158,8 +172,16 @@
+ 	st := *ui.Local(root, stateKey{}, newState)
+ 	st.o = o
+ 	ext := o.Extensions
++	if prepared != nil {
++		ext = prepared.Extensions()
++	}
+ 	if ext == 0 {
+ 		ext = parser.Default
++	}
++	if prepared != nil && st.doc != prepared {
++		st.forget()
++		st.doc, st.ext = prepared, ext
++		st.paras = nil
+ 	}
+ 	if st.doc == nil || st.ext != ext {
+ 		st.doc, st.ext = parser.New(ext), ext
+@@ -286,10 +308,15 @@
+ 	o := st.o
+ 	th := &st.th
+ 	b := d.Block(i)
+-	if o.Block != nil {
++	if o.Block != nil || o.BlockStyle != nil {
+ 		box := ui.Column(c)
++		if o.BlockStyle != nil {
++			o.BlockStyle(c, d, i, box)
++		}
+ 		done := false
+-		box.Children(func() { done = o.Block(c, d, i) })
++		if o.Block != nil {
++			box.Children(func() { done = o.Block(c, d, i) })
++		}
+ 		if done {
+ 			return box
+ 		}

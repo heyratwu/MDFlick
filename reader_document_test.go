@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/markdown/parser"
 	"mdflick/internal/testfixtures"
 )
 
@@ -39,13 +38,11 @@ func TestPreparedPublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !prepared.hasMermaid || len(prepared.ranges) == 0 || len(prepared.tables) != 1 || len(prepared.prose) == 0 {
+	if !prepared.hasMermaid || len(prepared.ranges) == 0 || prepared.parsed == nil {
 		t.Fatalf("incomplete snapshot: %+v", prepared)
 	}
-	for _, table := range prepared.tables {
-		if !strings.Contains(parser.Parse(table).HTML(), `href="https://example.com"`) {
-			t.Fatal("table lost references")
-		}
+	if !strings.Contains(prepared.parsed.HTML(), `href="https://example.com"`) {
+		t.Fatal("prepared parse lost references")
 	}
 	if a.completePrepared(old, source, prepared, nil) || a.prepared.markdown != "" {
 		t.Fatal("stale snapshot published")

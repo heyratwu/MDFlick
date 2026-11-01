@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"log"
 	"sync"
+
+	"mdflick/internal/diagnostics"
 )
 
 // Owned by application, shared by its windows. Slots bound active work; callers
@@ -54,3 +57,18 @@ func (b *byteBudget) reserve(n int64) bool {
 	return true
 }
 func (b *byteBudget) release(n int64) { b.mu.Lock(); b.used -= n; b.mu.Unlock() }
+
+// Logical cache accounting, alongside heap/RSS samples. Decoders, retained UI
+// frames and WebKit may still own memory after these reservations are returned.
+func (r *applicationResources) record(stage string) {
+	if r == nil || !diagnostics.Enabled() {
+		return
+	}
+	r.images.mu.Lock()
+	images := r.images.used
+	r.images.mu.Unlock()
+	r.diagramCache.mu.Lock()
+	diagrams := r.diagramCache.used
+	r.diagramCache.mu.Unlock()
+	log.Printf("resources stage=%s image_bytes=%d diagram_bytes=%d active_loads=%d active_diagrams=%d", stage, images, diagrams, len(r.loads), len(r.diagrams))
+}
