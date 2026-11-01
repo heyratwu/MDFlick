@@ -56,9 +56,7 @@ func (manager *application) newWindow(path string) *readerWindow {
 	})
 	manager.windows[path] = a
 	a.win.OnClosed(func() {
-		a.documentSession.close()
-		a.releaseImages()
-		a.resetRenderer()
+		a.close()
 		delete(manager.windows, a.path)
 	})
 	if path != "" {

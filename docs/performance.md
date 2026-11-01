@@ -1,0 +1,37 @@
+# 性能验证与预览资源边界
+
+## 重现基准
+
+```sh
+CGO_ENABLED=0 go test -run '^$' -bench 'Benchmark(NativePrepare|PreviewRender|PreviewCancelAfterParse)$' -benchmem -benchtime=5x . ./internal/preview
+```
+
+用于诊断的固定语料在 `internal/testfixtures/adapters.go`：约 1 MiB 多段落文本、500 个表格、1,000 组图片引用、256 个 Mermaid 围栏、500 个 HTML 对齐容器。可提高 `-benchtime` 并增加 `-count=5` 进行稳定性比较。比较时应使用相同工具链、机器和语料，避免其他构建/测试争抢资源。
+
+以下是 2026-11-01 的本机示例采样，Apple M4、macOS 26.6.2、Go 1.27.3、darwin/arm64，每项 5 次迭代。它是当前代码的诊断基线，不是优化前后的对照实验或 CI 性能阈值。
+
+| 场景 | 原生预处理 ms/op | 累计分配 MiB/op | Quick Look Go 渲染 ms/op | 累计分配 MiB/op |
+| --- | ---: | ---: | ---: | ---: |
+| 约 1 MiB 多段落文本 | 2.03 | 8.30 | 52.60 | 150.88 |
+| 500 个表格 | 1.31 | 8.52 | 3.95 | 11.09 |
+| 1,000 组图片引用 | 0.15 | 0.70 | 3.56 | 11.90 |
+| 256 个 Mermaid 围栏 | 0.11 | 0.44 | 1.35 | 9.30 |
+| 500 个 HTML 对齐容器 | 3.35 | 26.95 | 2.17 | 8.07 |
+
+`B/op` 是累计分配字节数，不是峰值存活内存或进程 RSS。原生基准只测后台预处理，不含 MyGo 原生解析/布局/绘制；Quick Look 基准只测 Go 解析、过滤与 HTML 输出，不含 Swift/C 拷贝、WebKit 首屏或真实 Mermaid 执行。图片语料测的是引用处理，不发网络请求、不解码位图。256 个图表语料中最多 128 个会被标记为待渲染，其余源码保留。
+
+解析完成后立即取消的约 1 MiB 文本基准为约 1.12 ms/op、8.30 MiB/op。这是当前语料的解析阶段成本，不能解释为所有文档的取消延迟上限。
+
+## 从测量确定的限制
+
+多段落文本的 DOM 和过滤链路存在明显的分配放大，因此在 Markdown 解析完成后、生成 HTML/DOM 前检查 20,000 个解析块的上限（包括解析器根块）。生成的中间 HTML 与最终 HTML 均受 64 MiB 限制，最终输出通过有界写入器组装。超限以稳定错误码 8 返回，不输出半份文档。单文件输入仍限于 32 MiB。
+
+Quick Look 最多渲染前 128 个 Mermaid 围栏。图表源码和复杂度仍由内置 Mermaid 的 50,000 字符、500 条边规则限制。静态内置脚本与 CSP 哈希只计算一次，避免每次预览重复拼接和哈希完整运行时。
+
+每个请求从 Swift 创建句柄开始计算 15 秒期限，覆盖 Swift 排队、文件读取检查点、Go 进程内排队及 Go 渲染。新请求取消旧请求；同一扩展进程只允许一个 Go 渲染进入执行。底层单次 Markdown 解析、Markdown 转 HTML，以及系统读取无法硬中断；它们返回后才响应取消。期限也不限制 WebKit 中已经开始的 JavaScript。块数、输出字节数和图片预算都不是进程/GPU 峰值内存的硬保证。
+
+## 分阶段记录
+
+在终端开发启动时设置 `MDFLICK_TRACE=1`，Go 输出 `pipeline stage=... elapsed=... bytes=...`，包含原生读取/预处理、Quick Look 解析、Markdown 转 HTML、DOM、过滤、输出以及 C 桥接的输入解码/输出复制。记录不包含文档路径或正文。
+
+Swift 使用 OSLog 的 `com.mdflick.app.QuickLook` / `Preview` 分类记录排队、读取、桥接、WebKit 载入、图表完成耗时。调试时在 Console 中启用对应 debug 日志；错误详情使用 private 隐私级别。HTML 提交成功与图表执行完成分别记录，都不能直接当成首屏像素时间。实际 Finder 快速切换、WebKit 布局、主题切换和图表耗时仍需安装后验证。

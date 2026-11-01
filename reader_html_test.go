@@ -68,7 +68,7 @@ func TestReaderAlignedLinksAndReload(t *testing.T) {
 	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 1000, 700)
 	clicked := ""
-	a.md.OnLink = func(dest string) { clicked = dest }
+	a.onLink = func(dest string) { clicked = dest }
 	tt.Frame()
 	if err := tt.Click("Go"); err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestReaderAlignedLinksAndReload(t *testing.T) {
 	if clicked != "https://example.com" {
 		t.Fatalf("reference link resolved to %q", clicked)
 	}
-	a.md.OnLink = nil
+	a.onLink = nil
 	tt.Frame()
 	before, _ := tt.Find("Destination")
 	if err := tt.Click("English"); err != nil {

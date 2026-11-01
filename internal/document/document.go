@@ -1,6 +1,7 @@
 package document
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -16,10 +17,16 @@ func Read(r io.Reader) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return Decode(b)
+}
+
+// Decode validates borrowed bytes and returns an owned UTF-8 string. The bridge
+// uses it directly to avoid copying C input into intermediate byte buffers.
+func Decode(b []byte) (string, error) {
 	if len(b) > MaxSize {
 		return "", TooLarge
 	}
-	b = []byte(strings.TrimPrefix(string(b), "\ufeff"))
+	b = bytes.TrimPrefix(b, []byte{0xef, 0xbb, 0xbf})
 	if !utf8.Valid(b) {
 		return "", InvalidUTF8
 	}

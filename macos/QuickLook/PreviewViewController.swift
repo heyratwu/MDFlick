@@ -3,22 +3,13 @@ import QuickLookUI
 import WebKit
 import OSLog
 
-// Thread-safe cancellation checkpoints around synchronous file/Go operations.
-private final class PreviewRequest {
-    private let lock = NSLock()
-    private var cancelled = false
-    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
-    func check() throws {
-        lock.lock(); let stopped = cancelled; lock.unlock()
-        if stopped { throw CocoaError(.userCancelled) }
-    }
-}
-
 @objc(PreviewViewController)
 final class PreviewViewController: NSViewController, QLPreviewingController, WKNavigationDelegate {
     private var webView: WKWebView!
     private var generation = 0
     private var activeRequest: PreviewRequest?
+    private var activeNavigation: WKNavigation?
+    private var loadStarted: TimeInterval = 0
     // Only one Go renderer runs at a time; obsolete queued requests exit early.
     private let renderQueue = DispatchQueue(label: "com.mdflick.preview", qos: .userInitiated)
 
@@ -41,26 +32,41 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         generation += 1
         let request = generation
         activeRequest?.cancel()
+        webView.stopLoading()
+        activeNavigation = nil
+        let queuedAt = ProcessInfo.processInfo.systemUptime
         let token = PreviewRequest()
         activeRequest = token
         renderQueue.async { [weak self] in
             var stage = "open document"
             do {
                 try token.check()
+                self?.logger.debug("Preview queue wait: \(ProcessInfo.processInfo.systemUptime - queuedAt, privacy: .public)s")
+                let readStarted = ProcessInfo.processInfo.systemUptime
+                guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { throw PreviewBridge.error(4) }
                 let input = try FileHandle(forReadingFrom: url)
                 defer { try? input.close() }
-                stage = "render document"
+                stage = "read document"
                 let data = try input.read(upToCount: PreviewBridge.maxSize + 1) ?? Data()
                 try token.check()
-                let html = try PreviewBridge.render(data)
+                self?.logger.debug("Preview read: \(ProcessInfo.processInfo.systemUptime - readStarted, privacy: .public)s, bytes: \(data.count, privacy: .public)")
+                stage = "render document"
+                let renderStarted = ProcessInfo.processInfo.systemUptime
+                let html = try PreviewBridge.render(data, request: token)
+                self?.logger.debug("Preview bridge: \(ProcessInfo.processInfo.systemUptime - renderStarted, privacy: .public)s")
                 try token.check()
                 DispatchQueue.main.async {
                     guard let self, self.generation == request else { handler(CocoaError(.userCancelled)); return }
-                    self.webView.loadHTMLString(html, baseURL: nil)
+                    self.loadStarted = ProcessInfo.processInfo.systemUptime
+                    self.activeNavigation = self.webView.loadHTMLString(html, baseURL: nil)
                     handler(nil)
                 }
             } catch {
-                self?.logger.error("Preview failed at \(stage, privacy: .public): \(String(describing: error), privacy: .public)")
+                if MDPreviewRequestStatus(token.handle) != 0 {
+                    self?.logger.debug("Preview cancelled or expired at \(stage, privacy: .public)")
+                } else {
+                    self?.logger.error("Preview failed at \(stage, privacy: .public): \(String(describing: error), privacy: .private)")
+                }
                 DispatchQueue.main.async {
                     guard let self, self.generation == request else { handler(CocoaError(.userCancelled)); return }
                     handler(error)
@@ -72,6 +78,25 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
     // Only generated content and same-document anchors may navigate.
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let url = action.request.url
-        decisionHandler(url?.scheme == "about" ? .allow : .cancel)
+        decisionHandler(PreviewBridge.allowsNavigation(url) ? .allow : .cancel)
     }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let navigation, navigation === activeNavigation else { return }
+        let request = generation
+        let started = loadStarted
+        logger.debug("Preview WebKit load: \(ProcessInfo.processInfo.systemUptime - started, privacy: .public)s")
+        // Completion above means HTML was submitted. Track diagram completion
+        // separately so these measurements do not claim to be first-paint time.
+        webView.callAsyncJavaScript("await window.mdflickReady; return true", arguments: [:], in: nil, in: .page) { [weak self] result in
+            guard let self, self.generation == request else { return }
+            switch result {
+            case .success:
+                self.logger.debug("Preview content ready: \(ProcessInfo.processInfo.systemUptime - started, privacy: .public)s")
+            case .failure(let error):
+                self.logger.error("Preview content failed: \(String(describing: error), privacy: .private)")
+            }
+        }
+    }
+
 }

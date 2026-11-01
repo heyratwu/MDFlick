@@ -4,8 +4,10 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui/markdown/parser"
+	"mdflick/internal/diagnostics"
 	"mdflick/internal/document"
 )
 
@@ -20,6 +22,8 @@ type preparedReaderDocument struct {
 }
 
 func prepareReaderDocument(ctx context.Context, source string) (preparedReaderDocument, error) {
+	started := time.Now()
+	defer func() { diagnostics.Record(ctx, "native.prepare", started, len(source)) }()
 	var result preparedReaderDocument
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -38,7 +42,7 @@ func prepareReaderDocument(ctx context.Context, source string) (preparedReaderDo
 	}
 	needsReferences := len(result.ranges) > 0
 	for i := 1; !needsReferences && i < parsed.Len(); i++ {
-		needsReferences = parsed.Block(i).Kind == parser.Table
+		needsReferences = parsed.Block(i).Kind == parser.Table || parsed.Block(i).Kind == parser.Heading
 	}
 	references := ""
 	if needsReferences {
@@ -60,7 +64,7 @@ func prepareReaderDocument(ctx context.Context, source string) (preparedReaderDo
 		}
 		k := sort.Search(len(result.ranges), func(k int) bool { return result.ranges[k].End > b.Start })
 		aligned := k < len(result.ranges) && result.ranges[k].Start <= b.Start
-		if len(result.ranges) > 0 && (b.Kind == parser.Heading || (b.Kind == parser.Paragraph && aligned)) {
+		if b.Kind == parser.Heading || (b.Kind == parser.Paragraph && aligned) {
 			result.prose[b.Start] = result.markdown[b.Start:b.End] + "\n\n" + references
 		}
 	}

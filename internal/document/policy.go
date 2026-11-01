@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"errors"
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
@@ -18,6 +19,9 @@ const (
 	InvalidArgument      Code = 5
 	InternalFailure      Code = 6
 	IOFailure            Code = 7
+	ResourceLimit        Code = 8
+	Cancelled            Code = 9
+	TimedOut             Code = 10
 )
 
 func (c Code) Error() string {
@@ -34,6 +38,12 @@ func (c Code) Error() string {
 		return "无效的预览请求"
 	case IOFailure:
 		return "无法读取 Markdown 文件"
+	case ResourceLimit:
+		return "文档渲染结果超过资源限制"
+	case Cancelled:
+		return "预览请求已取消"
+	case TimedOut:
+		return "生成预览超时"
 	case OK:
 		return ""
 	default:
@@ -43,6 +53,12 @@ func (c Code) Error() string {
 func CodeOf(err error) Code {
 	if err == nil {
 		return OK
+	}
+	if errors.Is(err, context.Canceled) {
+		return Cancelled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return TimedOut
 	}
 	var code Code
 	if errors.As(err, &code) {

@@ -5,6 +5,7 @@ import "context"
 // documentSession owns one document's load lifecycle, independently of MyGo.
 // Its state is confined to the UI thread; workers receive only ctx and a version.
 type documentSession struct {
+	prepared              preparedReaderDocument
 	path, source, failure string
 	loading, closed       bool
 	generation            uint64
@@ -41,6 +42,17 @@ func (s *documentSession) complete(version uint64, source string, err error) boo
 	} else {
 		s.failure = ""
 		s.source = source
+	}
+	return true
+}
+
+// Publish raw and derived content atomically at the session boundary.
+func (s *documentSession) completePrepared(version uint64, source string, prepared preparedReaderDocument, err error) bool {
+	if !s.complete(version, source, err) {
+		return false
+	}
+	if err == nil {
+		s.prepared = prepared
 	}
 	return true
 }

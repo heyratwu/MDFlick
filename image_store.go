@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo/ui"
+	"mdflick/internal/document"
 )
 
 const (
@@ -109,6 +110,9 @@ func acquireImageSlot(ctx context.Context, slots chan struct{}) error {
 func (s *imageStore) load(source string) (ui.ImageSource, error) {
 	if err := s.ctx.Err(); err != nil {
 		return nil, err
+	}
+	if !document.NativePolicy().AllowsImage(source) {
+		return nil, errors.New("不支持的图片地址协议")
 	}
 	key, err := s.key(source)
 	if err != nil {

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
-	"github.com/egoist/mygo/ui"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
+	"mdflick/internal/testfixtures"
 )
 
 func prepareTestReader(t *testing.T, a *readerWindow) {
@@ -58,5 +60,19 @@ func TestPreparedPublication(t *testing.T) {
 	cancel()
 	if _, err := prepareReaderDocument(ctx, source); err != context.Canceled {
 		t.Fatal(err)
+	}
+}
+
+func BenchmarkNativePrepare(b *testing.B) {
+	for _, tc := range testfixtures.PerformanceCases() {
+		b.Run(tc.Name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(tc.Source)))
+			for b.Loop() {
+				if _, err := prepareReaderDocument(context.Background(), tc.Source); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

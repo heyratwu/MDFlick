@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 	"github.com/egoist/mygo/ui/markdown/parser"
+	"mdflick/internal/document"
 )
 
 type readerHTMLState struct{ scrollTo string }
@@ -22,7 +23,7 @@ func (a *readerWindow) readerBlock(c *ui.Context, d *parser.Document, i int) boo
 	}
 	k := sort.Search(len(a.prepared.ranges), func(k int) bool { return a.prepared.ranges[k].End > b.Start })
 	aligned := k < len(a.prepared.ranges) && a.prepared.ranges[k].Start <= b.Start
-	if !aligned && (b.Kind != parser.Heading || len(a.prepared.ranges) == 0) {
+	if !aligned && b.Kind != parser.Heading {
 		return a.wideBlock(c, d, i)
 	}
 	align := ui.Start
@@ -37,29 +38,39 @@ func (a *readerWindow) readerBlock(c *ui.Context, d *parser.Document, i int) boo
 		align = ui.End
 	}
 	box := ui.Column(c).TextAlign(align)
-	if b.Kind == parser.Heading && a.html.scrollTo != "" && markdown.Slug(parser.PlainText(d.Inlines(i))) == a.html.scrollTo {
+	if b.Kind == parser.Heading && a.html.scrollTo != "" && document.HeadingAnchor(parser.PlainText(d.Inlines(i))) == a.html.scrollTo {
 		box.ScrollIntoView()
 		a.html.scrollTo = ""
 	}
 	state := *ui.Local(box, readerHTMLKey{}, func() *markdown.Options { return &markdown.Options{} })
 	state.Theme, state.LoadImage, state.Extensions = a.md.Theme, a.md.LoadImage, d.Extensions()
-	services, onLink := c.Services(), a.md.OnLink
-	state.OnLink = func(dest string) {
-		if onLink != nil {
-			onLink(dest)
-			return
-		}
-		if strings.HasPrefix(dest, "#") {
-			name, err := url.PathUnescape(dest[1:])
-			if err == nil {
-				a.html.scrollTo = strings.ToLower(name)
-			}
-		} else if ui.SafeToOpen(dest) {
-			services.OpenURL(dest)
-		}
-	}
+	state.OnLink = a.md.OnLink
+
 	box.Children(func() { markdown.View(c, a.prepared.prose[b.Start], state) })
 	return true
 }
 
 type readerHTMLKey struct{}
+
+// Every native Markdown surface routes links through the same policy. Anchor
+// requests are owned by the window, including links inside nested table views.
+func (a *readerWindow) linkHandler(c *ui.Context) func(string) {
+	services := c.Services()
+	return func(dest string) {
+		action := document.NativePolicy().Link(dest)
+		if action == document.IgnoreLink {
+			return
+		}
+		if a.onLink != nil {
+			a.onLink(dest)
+			return
+		}
+		switch action {
+		case document.ScrollToAnchor:
+			name, _ := url.PathUnescape(dest[1:])
+			a.html.scrollTo = strings.ToLower(name)
+		case document.OpenExternal:
+			services.OpenURL(dest)
+		}
+	}
+}

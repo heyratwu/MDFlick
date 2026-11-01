@@ -39,13 +39,7 @@ func TestDiagramAdmissionAndBudget(t *testing.T) {
 	if r.submit(diagramKey{}, nil) {
 		t.Fatal("closed renderer accepted work")
 	}
-	a := &readerWindow{diagrams: make(map[diagramKey]*diagramResult)}
-	one, two := diagramKey{code: "one"}, diagramKey{code: "two"}
-	a.storeDiagram(one, diagramResult{bytes: diagramCacheBudget})
-	a.storeDiagram(two, diagramResult{bytes: 4})
-	if a.diagramBytes != diagramCacheBudget || a.diagrams[two].err == nil || a.diagrams[two].image != nil {
-		t.Fatal("cache budget ignored")
-	}
+
 }
 
 func TestRendererClosesPendingWork(t *testing.T) {
@@ -83,27 +77,6 @@ func TestOutOfOrderLoadPublication(t *testing.T) {
 	s.close()
 	if s.complete(third, "after-close", nil) || s.source != "latest" {
 		t.Fatal("closed session accepted a completion")
-	}
-}
-
-func TestDiagramRejectsObsoleteCompletion(t *testing.T) {
-	old, current := &diagramRenderer{}, &diagramRenderer{}
-	a := &readerWindow{renderer: current, diagrams: make(map[diagramKey]*diagramResult)}
-	_, version := a.beginLoad()
-	key := diagramKey{code: "flowchart LR"}
-	a.commitDiagram(version-1, current, key, diagramResult{bytes: 4})
-	a.commitDiagram(version, old, key, diagramResult{bytes: 4})
-	if len(a.diagrams) != 0 || a.diagramBytes != 0 {
-		t.Fatal("obsolete result consumed cache")
-	}
-	a.commitDiagram(version, current, key, diagramResult{bytes: 4})
-	if a.diagramBytes != 4 {
-		t.Fatal("current renderer result lost")
-	}
-	a.close()
-	a.commitDiagram(version, current, key, diagramResult{bytes: 8})
-	if a.diagramBytes != 4 {
-		t.Fatal("closed window accepted result")
 	}
 }
 

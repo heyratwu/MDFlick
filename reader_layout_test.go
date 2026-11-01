@@ -43,7 +43,7 @@ func TestWideTableKeepsReferences(t *testing.T) {
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/table.md", source: "| Name |\n|---|\n| [Table link][ref] |\n\n[ref]: https://example.com\n"}}
 	clicked := ""
 	a.resetMarkdown(context.Background(), a.path)
-	a.md.OnLink = func(url string) { clicked = url }
+	a.onLink = func(url string) { clicked = url }
 	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 1600, 1000)
 	if err := tt.Click("Table link"); err != nil {

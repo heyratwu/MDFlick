@@ -3,27 +3,27 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
+	"mdflick/internal/diagnostics"
 	"mdflick/internal/document"
 	"mdflick/internal/typography"
 )
 
 // readerWindow owns native resources. All fields are accessed on the UI thread.
 type readerWindow struct {
+	onLink func(string)
 	documentSession
-	prepared     preparedReaderDocument
-	images       *imageStore
-	win          *mygo.Window
-	md           *markdown.Options
-	renderer     *diagramRenderer
-	diagrams     map[diagramKey]*diagramResult
-	diagramBytes int64
-	blockIndent  float32
-	html         readerHTMLState
-	open         func()
+	images      *imageStore
+	win         *mygo.Window
+	md          *markdown.Options
+	diagrams    *diagramService
+	blockIndent float32
+	html        readerHTMLState
+	open        func()
 }
 
 func (a *readerWindow) view(c *ui.Context) {
@@ -55,6 +55,7 @@ func (a *readerWindow) view(c *ui.Context) {
 			a.md.Theme = readerTheme(t.Dark)
 			a.md.CodeBlock = a.codeBlock
 			a.md.Block = a.readerBlock
+			a.md.OnLink = a.linkHandler(c)
 			source := a.prepared.markdown
 			left, prose, _ := readerWidths(c)
 			ui.Scroll(c).Key(struct {
@@ -78,10 +79,12 @@ func (a *readerWindow) load() {
 	}
 	ctx, generation := a.beginLoad()
 	path, win := a.path, a.win
-	a.resetRenderer()
+	a.closeDiagrams()
 	a.releaseImages()
 	go func() {
+		started := time.Now()
 		source, err := document.LoadContext(ctx, path)
+		diagnostics.Record(ctx, "native.read", started, len(source))
 		if ctx.Err() != nil {
 			return
 		}
@@ -99,12 +102,14 @@ func (a *readerWindow) load() {
 			if err != nil {
 				return
 			}
+			a.html = readerHTMLState{}
 			a.resetMarkdown(ctx, path)
-			if prepared.hasMermaid {
-				var renderErr error
-				a.renderer, renderErr = newDiagramRenderer(a.win)
+			if prepared.hasMermaid && document.NativePolicy().Mermaid {
+				backend, renderErr := newDiagramRenderer(a.win)
 				if renderErr != nil {
 					log.Println("Mermaid:", renderErr)
+				} else {
+					a.diagrams = newDiagramService(backend, func(fn func()) { win.Update(fn) })
 				}
 			}
 			a.win.SetRepresentedFile(path)
@@ -113,13 +118,15 @@ func (a *readerWindow) load() {
 	}()
 }
 
-func (a *readerWindow) resetRenderer() {
-	if a.renderer != nil {
-		a.renderer.close()
-		a.renderer = nil
-	}
-	a.diagrams = make(map[diagramKey]*diagramResult)
-	a.diagramBytes = 0
+func (a *readerWindow) closeDiagrams() {
+	a.diagrams.close()
+	a.diagrams = nil
+}
+
+func (a *readerWindow) close() {
+	a.documentSession.close()
+	a.releaseImages()
+	a.closeDiagrams()
 }
 
 // New options own a new image cache; never copy Options' internal sync.Map.
@@ -138,16 +145,4 @@ func (a *readerWindow) releaseImages() {
 		a.images = nil
 	}
 	a.md = nil
-}
-
-// Publish raw and derived content together, after rejecting stale generations.
-func (a *readerWindow) completePrepared(version uint64, source string, prepared preparedReaderDocument, err error) bool {
-	if !a.complete(version, source, err) {
-		return false
-	}
-	if err == nil {
-		a.prepared = prepared
-		a.html = readerHTMLState{}
-	}
-	return true
 }

@@ -24,7 +24,7 @@ struct BridgeTests {
         MDPreviewFree(nil)
         for _ in 0..<100 {
             let html = try PreviewBridge.render(Data("\u{FEFF}# 中文\n".utf8))
-            precondition(html.contains("<h1>中文</h1>"))
+            precondition(html.contains("<h1 id=\"中文\">中文</h1>"))
         }
         do {
             _ = try PreviewBridge.render(Data([0xff]))
@@ -33,6 +33,34 @@ struct BridgeTests {
             precondition((error as NSError).domain == "MDFlick")
             precondition(error.localizedDescription == "请使用 UTF-8 编码的 Markdown 文件")
         }
+        // Opaque request handles propagate cancellation through the real C ABI.
+        let cancelled = PreviewRequest()
+        cancelled.cancel()
+        precondition(MDPreviewRequestStatus(cancelled.handle) == 9)
+        var cancelledOutput: UnsafeMutablePointer<CChar>? = UnsafeMutablePointer(bitPattern: 1)
+        precondition(MDPreviewRenderRequest(cancelled.handle, nil, 0, &cancelledOutput) == 9)
+        precondition(cancelledOutput == nil)
+        do {
+            _ = try PreviewBridge.render(Data("# Cancelled".utf8), request: cancelled)
+            preconditionFailure("cancelled request rendered")
+        } catch {
+            precondition((error as NSError).code == 9)
+        }
+        let handle = MDPreviewNewRequest()
+        MDPreviewReleaseRequest(handle)
+        MDPreviewReleaseRequest(handle)
+        precondition(MDPreviewRequestStatus(handle) == 5)
+        precondition(MDPreviewRenderRequest(handle, nil, 0, &cancelledOutput) == 5)
+        precondition(cancelledOutput == nil)
+        for address in ["about:blank", "about:blank#heading"] {
+            precondition(PreviewBridge.allowsNavigation(URL(string: address)))
+        }
+        for address in ["https://example.com", "file:///tmp/doc.md", "about:config", "about:blank?other"] {
+            precondition(!PreviewBridge.allowsNavigation(URL(string: address)))
+        }
+        // A cancelled request cannot poison the subsequent render.
+        let fresh = try PreviewBridge.render(Data("# New".utf8))
+        precondition(fresh.contains("<h1 id=\"new\">New</h1>"))
         print("Swift/Go bridge tests passed")
     }
 }

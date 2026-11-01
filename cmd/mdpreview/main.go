@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"mdflick/internal/document"
 	"mdflick/internal/preview"
@@ -14,5 +15,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Print(preview.HTML(source))
+	html, err := preview.Render(context.Background(), source)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Print(html)
 }

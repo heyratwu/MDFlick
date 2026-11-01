@@ -6,14 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"image"
 	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/markdown"
 	"mdflick/internal/mermaid"
 )
 
@@ -107,53 +105,6 @@ func (r *diagramRenderer) render(ctx context.Context, key diagramKey) diagramRes
 	return diagramResult{image: bitmap, width: result.Width, err: err, bytes: pixels * 4}
 }
 
-func (a *readerWindow) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
-	if b.Open || a.renderer == nil {
-		a.codeBlock(c, b)
-		return
-	}
-	key := diagramKey{b.Code(), c.Theme().Dark}
-	result, exists := a.diagrams[key]
-	if !exists {
-		// Admission limits avoid both unbounded metadata and cache eviction/re-render
-		// loops when every Markdown block is constructed again on each frame.
-		if len(a.diagrams) >= 128 {
-			a.codeBlock(c, b)
-			return
-		}
-		renderer, generation, win := a.renderer, a.generation, a.win
-		a.diagrams[key] = nil
-		accepted := renderer.submit(key, func(rendered diagramResult) {
-			win.Update(func() {
-				a.commitDiagram(generation, renderer, key, rendered)
-			})
-		})
-		if !accepted {
-			a.diagrams[key] = &diagramResult{err: errors.New("图表渲染队列已满，重新载入可重试")}
-		}
-		result = a.diagrams[key]
-	}
-
-	if result == nil {
-		ui.Text(c, "正在渲染 Mermaid 图表…").TextColor(c.Theme().TextMuted)
-		a.codeBlock(c, b)
-		return
-	}
-	if result.err != nil {
-		ui.Text(c, "Mermaid 图表无法渲染，显示源码").TextColor(c.Theme().TextMuted).Tooltip(fmt.Sprint(result.err))
-		a.codeBlock(c, b)
-		return
-	}
-	ui.Row(c).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "Mermaid").TextColor(c.Theme().TextMuted)
-		ui.Spacer(c)
-		b.CopyButton(c)
-	})
-	ui.Image(c, result.image).Width(result.width).MaxWidthPercent(100).Label("Mermaid 图表").Role(ui.RoleImage)
-}
-
-const diagramCacheBudget int64 = 64 << 20
-
 type diagramJob struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -202,18 +153,4 @@ func (r *diagramRenderer) run(render func(context.Context, diagramKey) diagramRe
 			}
 		}
 	}
-}
-func (a *readerWindow) storeDiagram(key diagramKey, result diagramResult) {
-	if result.bytes > diagramCacheBudget-a.diagramBytes {
-		result = diagramResult{err: errors.New("图表缓存已达内存上限，显示源码")}
-	}
-	a.diagramBytes += result.bytes
-	a.diagrams[key] = &result
-}
-
-func (a *readerWindow) commitDiagram(generation uint64, renderer *diagramRenderer, key diagramKey, result diagramResult) {
-	if !a.accepts(generation) || a.renderer != renderer {
-		return
-	}
-	a.storeDiagram(key, result)
 }

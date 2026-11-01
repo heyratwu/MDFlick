@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
+	"sync"
 )
 
 // Mermaid 11.4.1, MIT licensed; see LICENSE and README.md.
@@ -16,14 +17,16 @@ var library string
 var runtime string
 
 // Scripts returns trusted scripts and the CSP hashes that authorize only them.
-func Scripts() (tags, policy string) {
+func Scripts() (tags, policy string) { return bundledScripts() }
+
+var bundledScripts = sync.OnceValues(func() (tags, policy string) {
 	for _, script := range []string{library, runtime} {
 		sum := sha256.Sum256([]byte(script))
 		policy += " 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 		tags += "<script>" + script + "</script>"
 	}
 	return tags, "script-src" + policy + ";"
-}
+})
 
 func HTML() string {
 	scripts, policy := Scripts()

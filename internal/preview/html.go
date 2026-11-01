@@ -3,22 +3,60 @@ package preview
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui/markdown/parser"
 	"golang.org/x/net/html"
+	"mdflick/internal/diagnostics"
 	"mdflick/internal/document"
 	"mdflick/internal/mermaid"
 	"mdflick/internal/typography"
 )
 
-// HTML sanitizes Markdown and authorizes only the bundled Mermaid scripts.
-// Raw HTML, active URLs, remote images and CSS from documents cannot execute
-// or contact the network inside Quick Look.
-func HTML(source string) string {
+// Limits bound generated output and interactive diagrams in Quick Look.
+const Timeout = 15 * time.Second
+const MaxHTMLSize = 64 << 20
+const MaxDiagrams = 128
+
+// Baselines show that many small blocks amplify DOM allocations. Reject before
+// HTML/DOM construction, while retaining the separate 32 MiB input ceiling.
+const MaxBlocks = 20_000
+
+type limits struct{ outputBytes, diagrams int }
+
+// Render produces a bounded passive preview. Cancellation is cooperative:
+// parser.Parse and parser.HTML are synchronous, with checks between stages.
+func Render(ctx context.Context, source string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, Timeout)
+	defer cancel()
+	return render(ctx, source, limits{MaxHTMLSize, MaxDiagrams})
+}
+
+func render(ctx context.Context, source string, limit limits) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if len(source) > document.MaxSize {
+		return "", document.TooLarge
+	}
+	started := time.Now()
 	parsed := parser.Parse(source)
+	diagnostics.Record(ctx, "preview.parse", started, len(source))
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if parsed.Len() > MaxBlocks {
+		return "", document.ResourceLimit
+	}
 	var codeBlocks []bool
+	diagrams := 0
 	for i := 0; i < parsed.Len(); i++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		if parsed.Block(i).Kind != parser.CodeBlock {
 			continue
 		}
@@ -32,15 +70,41 @@ func HTML(source string) string {
 			}
 		}
 		if !inFootnote {
-			codeBlocks = append(codeBlocks, document.IsMermaid(parsed.Block(i)))
+			eligible := document.QuickLookPolicy().Mermaid && document.IsMermaid(parsed.Block(i)) && diagrams < limit.diagrams
+			codeBlocks = append(codeBlocks, eligible)
+			if eligible {
+				diagrams++
+			}
 		}
 	}
 	codeIndex := 0
-	root, _ := html.Parse(strings.NewReader(parsed.HTML()))
+	started = time.Now()
+	generated := parsed.HTML()
+	diagnostics.Record(ctx, "preview.markdown-html", started, len(generated))
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if len(generated) > limit.outputBytes {
+		return "", document.ResourceLimit
+	}
+	started = time.Now()
+	root, err := html.Parse(contextReader{ctx, strings.NewReader(generated)})
+	diagnostics.Record(ctx, "preview.dom", started, len(generated))
+	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	started = time.Now()
 	var body bytes.Buffer
 	var sanitize func(*html.Node, *html.Node)
+	anchors := make(map[string]bool)
 	allowed := " p h1 h2 h3 h4 h5 h6 hr pre code blockquote ul ol li strong em del a img table thead tbody tr th td br sup sub input div span "
 	sanitize = func(n, parent *html.Node) {
+		if ctx.Err() != nil {
+			return
+		}
 		if n.Type == html.TextNode {
 			parent.AppendChild(&html.Node{Type: html.TextNode, Data: n.Data})
 			return
@@ -72,11 +136,11 @@ func HTML(source string) string {
 			case "alt", "title", "colspan", "rowspan", "start", "checked":
 				clean.Attr = append(clean.Attr, a)
 			case "href":
-				if strings.HasPrefix(a.Val, "#") {
+				if document.QuickLookPolicy().Link(a.Val) == document.ScrollToAnchor {
 					clean.Attr = append(clean.Attr, a)
 				}
 			case "src":
-				if strings.HasPrefix(a.Val, "data:image/png;base64,") || strings.HasPrefix(a.Val, "data:image/jpeg;base64,") {
+				if document.QuickLookPolicy().AllowsImage(a.Val) {
 					clean.Attr = append(clean.Attr, a)
 				}
 			}
@@ -88,16 +152,105 @@ func HTML(source string) string {
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			sanitize(c, clean)
 		}
+		if len(clean.Data) == 2 && clean.Data[0] == 'h' && clean.Data[1] >= '1' && clean.Data[1] <= '6' {
+			anchor := document.HeadingAnchor(headingText(clean))
+			// Native anchors select the first matching heading.
+			if anchor != "" && !anchors[anchor] {
+				clean.Attr = append(clean.Attr, html.Attribute{Key: "id", Val: anchor})
+				anchors[anchor] = true
+			}
+		}
 	}
 	container := &html.Node{Type: html.ElementNode, Data: "div"}
 	sanitize(root, container)
+	diagnostics.Record(ctx, "preview.sanitize", started, len(generated))
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	started = time.Now()
+	writer := &boundedWriter{ctx: ctx, writer: &body, remaining: limit.outputBytes}
 	for c := container.FirstChild; c != nil; c = c.NextSibling {
-		_ = html.Render(&body, c)
+		if err := html.Render(writer, c); err != nil {
+			return "", err
+		}
 	}
 	scripts, policy := "", ""
-	if document.HasMermaid(parsed) {
+	if diagrams > 0 {
 		scripts, policy = mermaid.Scripts()
 	}
-	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>` + typography.CSS() + `
-</style></head><body>` + body.String() + scripts + `</body></html>`
+	head := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>` + typography.CSS() + `
+</style></head><body>`
+	tail := scripts + `</body></html>`
+	if len(head)+body.Len()+len(tail) > limit.outputBytes {
+		return "", document.ResourceLimit
+	}
+	var output strings.Builder
+	output.Grow(len(head) + body.Len() + len(tail))
+	output.WriteString(head)
+	output.Write(body.Bytes())
+	output.WriteString(tail)
+	diagnostics.Record(ctx, "preview.output", started, output.Len())
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return output.String(), nil
+}
+
+// Check cancellation during the HTML parser's reads and serialized output.
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(p) > 64<<10 {
+		p = p[:64<<10]
+	}
+	return r.reader.Read(p)
+}
+
+type boundedWriter struct {
+	ctx       context.Context
+	writer    io.Writer
+	remaining int
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(p) > w.remaining {
+		return 0, document.ResourceLimit
+	}
+	n, err := w.writer.Write(p)
+	w.remaining -= n
+	return n, err
+}
+
+func headingText(n *html.Node) string {
+	var text strings.Builder
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.TextNode {
+			text.WriteString(n.Data)
+		}
+		if n.Type == html.ElementNode && n.Data == "br" {
+			text.WriteByte(' ')
+		}
+		if n.Type == html.ElementNode && n.Data == "img" {
+			for _, a := range n.Attr {
+				if a.Key == "alt" {
+					text.WriteString(a.Val)
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(n)
+	return text.String()
 }
