@@ -46,7 +46,7 @@ func (a *app) view(c *ui.Context) {
 			})
 		} else {
 			a.md.Theme = &markdown.Theme{FontSize: 16, LineHeight: 1.7}
-			ui.Scroll(c).Key(a.path).Grow(1).Padding(28).Children(func() {
+			ui.Scroll(c).Key(a.path).Grow(1).Padding(28, 60).Children(func() {
 				markdown.View(c, a.source, &a.md)
 				if a.source == "" {
 					ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted)
@@ -147,6 +147,9 @@ func main() {
 		return a
 	}
 	openPath = func(path string, target *app) {
+		if target == nil {
+			target = manager.windows[""]
+		}
 		absolute, err := filepath.Abs(path)
 		if err != nil {
 			log.Println(err)
@@ -196,12 +199,7 @@ func main() {
 		{Role: mygo.RoleWindowMenu},
 	}))
 	mygo.App.OnOpenFile(func(path string) { mygo.App.WhenReady(func() { openPath(path, nil) }) })
-	mygo.App.OnWindowAllClosed(func() {})
-	mygo.App.OnActivate(func(visible bool) {
-		if !visible {
-			newWindow("")
-		}
-	})
+	// MyGo quits when the last window closes unless a listener overrides it.
 	mygo.App.WhenReady(func() {
 		if len(manager.windows) == 0 {
 			newWindow("")
