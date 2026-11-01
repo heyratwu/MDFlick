@@ -2,7 +2,6 @@
 package preview
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"strings"
@@ -81,7 +80,6 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 			}
 		}
 	}
-	codeIndex := 0
 	started = time.Now()
 	generated := parsed.HTML()
 	diagnostics.Record(ctx, "preview.markdown-html", started, len(generated))
@@ -101,98 +99,40 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 		return "", err
 	}
 	started = time.Now()
-	var body bytes.Buffer
-	var sanitize func(*html.Node, *html.Node)
-	anchors := make(map[string]bool)
-	allowed := " p h1 h2 h3 h4 h5 h6 hr pre code blockquote ul ol li strong em del a img table thead tbody tr th td br sup sub input div span "
-	sanitize = func(n, parent *html.Node) {
-		if ctx.Err() != nil {
-			return
-		}
-		if n.Type == html.TextNode {
-			parent.AppendChild(&html.Node{Type: html.TextNode, Data: n.Data})
-			return
-		}
-		if n.Type != html.ElementNode || n.Data == "html" || n.Data == "body" {
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				sanitize(c, parent)
-			}
-			return
-		}
-		if !strings.Contains(allowed, " "+n.Data+" ") {
-			return
-		}
-		clean := &html.Node{Type: html.ElementNode, Data: n.Data, DataAtom: n.DataAtom}
-		// Only fenced Markdown code blocks receive a Mermaid marker.
-		if n.Data == "pre" && n.FirstChild != nil && n.FirstChild.Data == "code" {
-			if codeIndex < len(codeBlocks) && codeBlocks[codeIndex] {
-				clean.Attr = append(clean.Attr, html.Attribute{Key: "class", Val: "mermaid-source"})
-			}
-			codeIndex++
-		}
-		for _, a := range n.Attr {
-			switch a.Key {
-			case "align":
-				align := strings.ToLower(strings.TrimSpace(a.Val))
-				if align == "left" || align == "center" || align == "right" {
-					clean.Attr = append(clean.Attr, html.Attribute{Key: "align", Val: align})
-				}
-			case "alt", "title", "colspan", "rowspan", "start", "checked":
-				clean.Attr = append(clean.Attr, a)
-			case "href":
-				if document.QuickLookPolicy().Link(a.Val) == document.ScrollToAnchor {
-					clean.Attr = append(clean.Attr, a)
-				}
-			case "src":
-				if document.QuickLookPolicy().AllowsImage(a.Val) {
-					clean.Attr = append(clean.Attr, a)
-				}
-			}
-		}
-		if n.Data == "input" {
-			clean.Attr = append(clean.Attr, html.Attribute{Key: "type", Val: "checkbox"}, html.Attribute{Key: "disabled", Val: ""})
-		}
-		parent.AppendChild(clean)
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			sanitize(c, clean)
-		}
-		if len(clean.Data) == 2 && clean.Data[0] == 'h' && clean.Data[1] >= '1' && clean.Data[1] <= '6' {
-			anchor := document.HeadingAnchor(headingText(clean))
-			// Native anchors select the first matching heading.
-			if anchor != "" && !anchors[anchor] {
-				clean.Attr = append(clean.Attr, html.Attribute{Key: "id", Val: anchor})
-				anchors[anchor] = true
-			}
-		}
+	if err := sanitizeDOM(ctx, root, codeBlocks); err != nil {
+		return "", err
 	}
-	container := &html.Node{Type: html.ElementNode, Data: "div"}
-	sanitize(root, container)
+
 	diagnostics.Record(ctx, "preview.sanitize", started, len(generated))
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	started = time.Now()
-	writer := &boundedWriter{ctx: ctx, writer: &body, remaining: limit.outputBytes}
-	for c := container.FirstChild; c != nil; c = c.NextSibling {
-		if err := html.Render(writer, c); err != nil {
-			return "", err
-		}
-	}
 	scripts, policy := "", ""
 	if diagrams > 0 {
 		scripts, policy = mermaid.Scripts()
 	}
 	head := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>` + typography.CSS() + `
 </style></head><body>`
-	tail := scripts + `</body></html>`
-	if len(head)+body.Len()+len(tail) > limit.outputBytes {
+	const tail = `</body></html>`
+	fixedBytes := len(head) + len(scripts) + len(tail)
+	if fixedBytes > limit.outputBytes {
 		return "", document.ResourceLimit
 	}
 	var output strings.Builder
-	output.Grow(len(head) + body.Len() + len(tail))
+	// Use the generated length as an estimate, bounded by the output allowance.
+	// The body is serialized straight into the final allocation, without a copy.
+	output.Grow(fixedBytes + min(len(generated), limit.outputBytes-fixedBytes))
 	output.WriteString(head)
-	output.Write(body.Bytes())
+	writer := &boundedWriter{ctx: ctx, writer: &output, remaining: limit.outputBytes - fixedBytes}
+	// A single DocumentNode render shares one serialization buffer across all
+	// blocks; per-child Render calls otherwise each allocate a new bufio.Writer.
+	if err := html.Render(writer, root); err != nil {
+		return "", err
+	}
+	output.WriteString(scripts)
 	output.WriteString(tail)
+
 	diagnostics.Record(ctx, "preview.output", started, output.Len())
 	if err := ctx.Err(); err != nil {
 		return "", err

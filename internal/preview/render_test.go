@@ -160,3 +160,54 @@ func TestPreviewHeadingAnchors(t *testing.T) {
 		t.Fatal("heading navigation target missing or duplicated", result)
 	}
 }
+
+func TestRenderExactOutputBudget(t *testing.T) {
+	for _, source := range []string{
+		"# Heading\n\n" + strings.Repeat("Paragraph **bold** & < text.\n\n", 200),
+		"```mermaid\nflowchart LR; A-->B\n```",
+	} {
+		expected := renderHTML(t, source)
+		result, err := render(context.Background(), source, limits{len(expected), MaxDiagrams})
+		if err != nil || result != expected {
+			t.Fatal("exact output allowance failed", err)
+		}
+		result, err = render(context.Background(), source, limits{len(expected) - 1, MaxDiagrams})
+		if !errors.Is(err, document.ResourceLimit) || result != "" {
+			t.Fatal("body and bundled scripts exceeded shared allowance", err)
+		}
+	}
+}
+
+type outputCancelContext struct {
+	context.Context
+	remaining int
+}
+
+func (c *outputCancelContext) Err() error {
+	if c.remaining < 0 {
+		return nil
+	}
+	c.remaining--
+	if c.remaining <= 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestCancelDuringOutputReturnsNoDocument(t *testing.T) {
+	ctx := &outputCancelContext{remaining: -1}
+	lastStage := ""
+	ctx.Context = diagnostics.WithObserver(context.Background(), func(event diagnostics.Event) {
+		lastStage = event.Stage
+		if event.Stage == "preview.sanitize" {
+			ctx.remaining = 4
+		}
+	})
+	// Large enough for several serialization-buffer flushes. Cancellation happens
+	// after some bytes have been written into the private output builder.
+	source := strings.Repeat("Paragraph **bold** & < literal.\n\n", 2000)
+	result, err := render(ctx, source, limits{MaxHTMLSize, MaxDiagrams})
+	if err != context.Canceled || result != "" || lastStage != "preview.sanitize" {
+		t.Fatalf("output cancellation published a document or entered a later stage: %v, %s", err, lastStage)
+	}
+}
