@@ -19,7 +19,7 @@ func (f *fakeDiagramBackend) close() { f.closed = true }
 func TestDiagramServiceLifetimeAndAdmission(t *testing.T) {
 	backend := &fakeDiagramBackend{}
 	var publications []func()
-	s := newDiagramService(backend, func(fn func()) { publications = append(publications, fn) })
+	s := newDiagramService(backend, func(fn func()) { publications = append(publications, fn) }, &byteBudget{limit: 128 << 20})
 	key := diagramKey{code: "one"}
 	s.request(key)
 	s.request(key)
@@ -32,7 +32,7 @@ func TestDiagramServiceLifetimeAndAdmission(t *testing.T) {
 	}
 	s.close()
 	s.close()
-	current := newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() })
+	current := newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})
 	publications[0]()
 	if !backend.closed || s.bytes != 0 || len(s.entries) != 0 || len(current.entries) != 0 {
 		t.Fatal("closed service retained or published results")
@@ -45,7 +45,7 @@ func TestDiagramServiceLifetimeAndAdmission(t *testing.T) {
 
 func TestDiagramServiceBudgetAndQueueFailure(t *testing.T) {
 	backend := &fakeDiagramBackend{}
-	s := newDiagramService(backend, func(fn func()) { fn() })
+	s := newDiagramService(backend, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})
 	defer s.close()
 	one, two := diagramKey{code: "one"}, diagramKey{code: "two"}
 	s.request(one)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 	"mdflick/internal/testfixtures"
 )
 
@@ -42,7 +43,7 @@ func TestPreparedPublication(t *testing.T) {
 		t.Fatalf("incomplete snapshot: %+v", prepared)
 	}
 	for _, table := range prepared.tables {
-		if !strings.Contains(table, "[ref]: https://example.com") {
+		if !strings.Contains(parser.Parse(table).HTML(), `href="https://example.com"`) {
 			t.Fatal("table lost references")
 		}
 	}

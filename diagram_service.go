@@ -18,11 +18,12 @@ type diagramService struct {
 	publish func(func())
 	entries map[diagramKey]*diagramResult
 	bytes   int64
+	budget  *byteBudget
 	closed  bool
 }
 
-func newDiagramService(backend diagramBackend, publish func(func())) *diagramService {
-	return &diagramService{backend: backend, publish: publish, entries: make(map[diagramKey]*diagramResult)}
+func newDiagramService(backend diagramBackend, publish func(func()), budget *byteBudget) *diagramService {
+	return &diagramService{backend: backend, publish: publish, budget: budget, entries: make(map[diagramKey]*diagramResult)}
 }
 
 func (s *diagramService) request(key diagramKey) (*diagramResult, bool) {
@@ -50,7 +51,10 @@ func (s *diagramService) commit(key diagramKey, result diagramResult) {
 	if s.closed || !exists || pending != nil {
 		return
 	}
-	if result.bytes < 0 || result.bytes > diagramCacheBudget-s.bytes {
+	if result.err != nil {
+		result.image, result.bytes = nil, 0
+	}
+	if result.bytes < 0 || result.bytes > diagramCacheBudget-s.bytes || !s.budget.reserve(result.bytes) {
 		result = diagramResult{err: errors.New("图表缓存已达内存上限，显示源码")}
 	}
 	s.bytes += result.bytes
@@ -64,5 +68,6 @@ func (s *diagramService) close() {
 	s.closed = true
 	s.backend.close()
 	clear(s.entries)
+	s.budget.release(s.bytes)
 	s.bytes = 0
 }

@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"strings"
 
 	"github.com/egoist/mygo/ui/markdown/parser"
@@ -16,13 +17,21 @@ type HTMLAlignment struct {
 
 type htmlContainer struct{ tag, align string }
 
-// NativeHTML translates passive HTML blocks into Markdown for the native view.
-// The parser, rather than a source-wide replacement, keeps literal code intact.
-func NativeHTML(source string) (string, []HTMLAlignment) {
-	if !strings.Contains(source, "<") {
-		return source, nil
+// NativeHTMLContext reuses the caller's parse and returns no partial result on
+// cancellation or limit failure. Offsets always refer to the converted source.
+func NativeHTMLContext(ctx context.Context, d *parser.Document, limit ProcessingLimits) (string, []HTMLAlignment, error) {
+	source := d.Source()
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
 	}
-	d := parser.Parse(source)
+	if len(source) > limit.ConvertedBytes || d.Len() > limit.Blocks {
+		return "", nil, ResourceLimit
+	}
+	if !strings.Contains(source, "<") {
+		return source, nil, nil
+	}
+	var failure error
+
 	var out strings.Builder
 	var ranges []HTMLAlignment
 	var stack []htmlContainer
@@ -35,6 +44,17 @@ func NativeHTML(source string) (string, []HTMLAlignment) {
 		return ""
 	}
 	write := func(s string) {
+		if failure != nil {
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			failure = err
+			return
+		}
+		if len(s) > limit.ConvertedBytes-out.Len() {
+			failure = ResourceLimit
+			return
+		}
 		if s == "" {
 			return
 		}
@@ -50,6 +70,12 @@ func NativeHTML(source string) (string, []HTMLAlignment) {
 	}
 	end := 0
 	for i := 1; i < d.Len(); i++ {
+		if err := ctx.Err(); err != nil {
+			return "", nil, err
+		}
+		if failure != nil {
+			return "", nil, failure
+		}
 		b := d.Block(i)
 		if b.Kind != parser.HTMLBlock {
 			continue
@@ -59,6 +85,12 @@ func NativeHTML(source string) (string, []HTMLAlignment) {
 		pre, skip := false, ""
 		var links []string
 		for {
+			if err := ctx.Err(); err != nil {
+				return "", nil, err
+			}
+			if failure != nil {
+				return "", nil, failure
+			}
 			kind := z.Next()
 			if kind == html.ErrorToken {
 				break
@@ -172,5 +204,11 @@ func NativeHTML(source string) (string, []HTMLAlignment) {
 		end = b.End
 	}
 	write(source[end:])
-	return out.String(), ranges
+	if failure != nil {
+		return "", nil, failure
+	}
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
+	return out.String(), ranges, nil
 }

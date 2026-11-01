@@ -22,36 +22,54 @@ type preparedReaderDocument struct {
 }
 
 func prepareReaderDocument(ctx context.Context, source string) (preparedReaderDocument, error) {
+	return prepareReaderDocumentWithLimits(ctx, source, document.NativeLimits())
+}
+
+func prepareReaderDocumentWithLimits(parent context.Context, source string, limit document.ProcessingLimits) (preparedReaderDocument, error) {
+	ctx, cancel := context.WithTimeout(parent, limit.Timeout)
+	defer cancel()
+	totalStarted := time.Now()
+	defer func() { diagnostics.Record(ctx, "native.prepare", totalStarted, len(source)) }()
 	started := time.Now()
-	defer func() { diagnostics.Record(ctx, "native.prepare", started, len(source)) }()
 	var result preparedReaderDocument
 	if err := ctx.Err(); err != nil {
-		return result, err
+		return preparedReaderDocument{}, err
 	}
-	parsed := parser.Parse(source)
+	if len(source) > document.MaxSize {
+		return result, document.TooLarge
+	}
+	parsed, err := limit.Parse(ctx, source)
+	diagnostics.Record(ctx, "native.parse", started, len(source))
+	if err != nil {
+		return preparedReaderDocument{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return preparedReaderDocument{}, err
+	}
 	result.hasMermaid = document.HasMermaid(parsed)
 	if err := ctx.Err(); err != nil {
-		return result, err
+		return preparedReaderDocument{}, err
 	}
-	result.markdown, result.ranges = document.NativeHTML(source)
+	started = time.Now()
+	result.markdown, result.ranges, err = document.NativeHTMLContext(ctx, parsed, limit)
+	if err != nil {
+		return preparedReaderDocument{}, err
+	}
 	if err := ctx.Err(); err != nil {
-		return result, err
+		return preparedReaderDocument{}, err
+	}
+	diagnostics.Record(ctx, "native.html", started, len(result.markdown))
+	if err := ctx.Err(); err != nil {
+		return preparedReaderDocument{}, err
 	}
 	if result.markdown != source {
-		parsed = parser.Parse(result.markdown)
-	}
-	needsReferences := len(result.ranges) > 0
-	for i := 1; !needsReferences && i < parsed.Len(); i++ {
-		needsReferences = parsed.Block(i).Kind == parser.Table || parsed.Block(i).Kind == parser.Heading
-	}
-	references := ""
-	if needsReferences {
-		var err error
-		references, err = readerReferences(ctx, parsed)
+		parsed, err = limit.Parse(ctx, result.markdown)
 		if err != nil {
 			return preparedReaderDocument{}, err
 		}
 	}
+	started = time.Now()
+	remaining := limit.FragmentBytes
 	result.tables = make(map[int]string)
 	result.prose = make(map[int]string)
 	for i := 1; i < parsed.Len(); i++ {
@@ -59,68 +77,96 @@ func prepareReaderDocument(ctx context.Context, source string) (preparedReaderDo
 			return preparedReaderDocument{}, err
 		}
 		b := parsed.Block(i)
-		if b.Kind == parser.Table {
-			result.tables[b.Start] = readerTableMarkdown(parsed, i, references)
-		}
 		k := sort.Search(len(result.ranges), func(k int) bool { return result.ranges[k].End > b.Start })
 		aligned := k < len(result.ranges) && result.ranges[k].Start <= b.Start
-		if b.Kind == parser.Heading || (b.Kind == parser.Paragraph && aligned) {
-			result.prose[b.Start] = result.markdown[b.Start:b.End] + "\n\n" + references
+		if b.Kind != parser.Table && b.Kind != parser.Heading && !(b.Kind == parser.Paragraph && aligned) {
+			continue
 		}
+		if b.End-b.Start > remaining {
+			return preparedReaderDocument{}, document.ResourceLimit
+		}
+		refs, err := fragmentReferences(ctx, parsed, i, remaining)
+		if err != nil {
+			return preparedReaderDocument{}, err
+		}
+		var fragment string
+		if b.Kind == parser.Table {
+			fragment, err = readerTableMarkdownContext(ctx, parsed, i, refs, remaining)
+			if err != nil {
+				return preparedReaderDocument{}, err
+			}
+			result.tables[b.Start] = fragment
+		} else {
+			size := b.End - b.Start + 2 + len(refs)
+			if size > remaining {
+				return preparedReaderDocument{}, document.ResourceLimit
+			}
+			fragment = result.markdown[b.Start:b.End] + "\n\n" + refs
+			result.prose[b.Start] = fragment
+		}
+		remaining -= len(fragment)
 	}
-	return result, ctx.Err()
+	diagnostics.Record(ctx, "native.fragments", started, limit.FragmentBytes-remaining)
+	if err := ctx.Err(); err != nil {
+		return preparedReaderDocument{}, err
+	}
+	return result, nil
 }
 
-func readerTableMarkdown(d *parser.Document, i int, refs string) string {
+// Rebuild cells without list/quote prefixes, with bounded writes and cancellation.
+func readerTableMarkdownContext(ctx context.Context, d *parser.Document, i int, refs string, remaining int) (string, error) {
 	b := d.Block(i)
-	// Rebuild rows from cell source ranges to remove list/quote prefixes.
 	var table strings.Builder
-	for row := range d.Children(i) {
-		table.WriteByte('|')
-		for cell := range d.Children(row) {
-			cb := d.Block(cell)
-			table.WriteString(d.Source()[cb.Start:cb.End])
-			table.WriteByte('|')
+	var failure error
+	write := func(s string) {
+		if failure != nil {
+			return
 		}
-		table.WriteByte('\n')
+		if err := ctx.Err(); err != nil {
+			failure = err
+			return
+		}
+		if len(s) > remaining-table.Len() {
+			failure = document.ResourceLimit
+			return
+		}
+		table.WriteString(s)
+	}
+	for row := range d.Children(i) {
+		if failure != nil {
+			return "", failure
+		}
+		write("|")
+		for cell := range d.Children(row) {
+			if failure != nil {
+				return "", failure
+			}
+			cb := d.Block(cell)
+			write(d.Source()[cb.Start:cb.End])
+			write("|")
+		}
+		write("\n")
 		if d.Block(row).Header {
-			table.WriteByte('|')
+			write("|")
 			for _, align := range b.Align {
 				switch align {
 				case parser.AlignCenter:
-					table.WriteString(":---:|")
+					write(":---:|")
 				case parser.AlignRight:
-					table.WriteString("---:|")
+					write("---:|")
 				case parser.AlignLeft:
-					table.WriteString(":---|")
+					write(":---|")
 				default:
-					table.WriteString("---|")
+					write("---|")
 				}
 			}
-			table.WriteByte('\n')
+			write("\n")
 		}
 	}
-	return table.String() + "\n" + refs
-}
-
-func readerReferences(ctx context.Context, d *parser.Document) (string, error) {
-	// Keep reference definitions available to blocks rendered in nested views.
-	var refs strings.Builder
-	end := 0
-	for j := range d.Children(0) {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		block := d.Block(j)
-		gap := strings.TrimLeft(d.Source()[end:block.Start], " \t|>")
-		if parser.Parse(gap).Len() == 1 {
-			refs.WriteString(gap)
-			refs.WriteByte('\n')
-		}
-		end = block.End
+	write("\n")
+	write(refs)
+	if failure != nil {
+		return "", failure
 	}
-	if gap := strings.TrimLeft(d.Source()[end:], " \t|>"); parser.Parse(gap).Len() == 1 {
-		refs.WriteString(gap)
-	}
-	return refs.String(), ctx.Err()
+	return table.String(), ctx.Err()
 }

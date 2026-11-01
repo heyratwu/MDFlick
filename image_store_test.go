@@ -18,6 +18,9 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// Shared fixture; production resources belong to application.
+var applicationImages = &imageResources{limit: applicationImageBudget, slots: make(chan struct{}, 4)}
+
 func imageTestResources(limit int64, concurrency int) *imageResources {
 	return &imageResources{limit: limit, slots: make(chan struct{}, concurrency)}
 }

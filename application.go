@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 )
 
-type application struct{ windows map[string]*readerWindow }
+type application struct {
+	windows   map[string]*readerWindow
+	resources *applicationResources
+}
 
 // assignHome moves an existing welcome window into the document registry.
 // A closed or already occupied window must never consume another selection.
@@ -40,7 +43,10 @@ func (manager *application) openDialog(target *readerWindow) {
 	}()
 }
 func (manager *application) newWindow(path string) *readerWindow {
-	a := &readerWindow{documentSession: documentSession{path: path}}
+	if manager.resources == nil {
+		manager.resources = newApplicationResources()
+	}
+	a := &readerWindow{documentSession: documentSession{path: path}, resources: manager.resources}
 	a.open = func() { manager.openDialog(a) }
 	title := "MDFlick"
 	if path != "" {

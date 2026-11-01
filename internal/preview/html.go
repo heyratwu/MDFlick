@@ -17,13 +17,13 @@ import (
 )
 
 // Limits bound generated output and interactive diagrams in Quick Look.
-const Timeout = 15 * time.Second
-const MaxHTMLSize = 64 << 20
+const Timeout = document.ProcessingTimeout
+const MaxHTMLSize = document.MaxDerivedSize
 const MaxDiagrams = 128
 
 // Baselines show that many small blocks amplify DOM allocations. Reject before
 // HTML/DOM construction, while retaining the separate 32 MiB input ceiling.
-const MaxBlocks = 20_000
+const MaxBlocks = document.MaxBlocks
 
 type limits struct{ outputBytes, diagrams int }
 
@@ -43,7 +43,11 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 		return "", document.TooLarge
 	}
 	started := time.Now()
-	parsed := parser.Parse(source)
+	processing := document.QuickLookLimits()
+	parsed, err := processing.Parse(ctx, source)
+	if err != nil {
+		return "", err
+	}
 	diagnostics.Record(ctx, "preview.parse", started, len(source))
 	if err := ctx.Err(); err != nil {
 		return "", err

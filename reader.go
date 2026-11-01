@@ -15,7 +15,8 @@ import (
 
 // readerWindow owns native resources. All fields are accessed on the UI thread.
 type readerWindow struct {
-	onLink func(string)
+	onLink    func(string)
+	resources *applicationResources
 	documentSession
 	images      *imageStore
 	win         *mygo.Window
@@ -77,21 +78,16 @@ func (a *readerWindow) load() {
 	if a.closed {
 		return
 	}
+	if a.resources == nil {
+		a.resources = newApplicationResources()
+	}
+	resources := a.resources
 	ctx, generation := a.beginLoad()
 	path, win := a.path, a.win
 	a.closeDiagrams()
 	a.releaseImages()
 	go func() {
-		started := time.Now()
-		source, err := document.LoadContext(ctx, path)
-		diagnostics.Record(ctx, "native.read", started, len(source))
-		if ctx.Err() != nil {
-			return
-		}
-		var prepared preparedReaderDocument
-		if err == nil {
-			prepared, err = prepareReaderDocument(ctx, source)
-		}
+		source, prepared, err := loadReaderDocument(ctx, path, resources)
 		if ctx.Err() != nil {
 			return
 		}
@@ -105,11 +101,11 @@ func (a *readerWindow) load() {
 			a.html = readerHTMLState{}
 			a.resetMarkdown(ctx, path)
 			if prepared.hasMermaid && document.NativePolicy().Mermaid {
-				backend, renderErr := newDiagramRenderer(a.win)
+				backend, renderErr := newDiagramRenderer(a.win, resources.diagrams)
 				if renderErr != nil {
 					log.Println("Mermaid:", renderErr)
 				} else {
-					a.diagrams = newDiagramService(backend, func(fn func()) { win.Update(fn) })
+					a.diagrams = newDiagramService(backend, func(fn func()) { win.Update(fn) }, resources.diagramCache)
 				}
 			}
 			a.win.SetRepresentedFile(path)
@@ -132,7 +128,10 @@ func (a *readerWindow) close() {
 // New options own a new image cache; never copy Options' internal sync.Map.
 func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
 	a.releaseImages()
-	a.images = newImageStore(ctx, path, applicationImages)
+	if a.resources == nil {
+		a.resources = newApplicationResources()
+	}
+	a.images = newImageStore(ctx, path, a.resources.images)
 	a.md = &markdown.Options{
 		Code:      map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock},
 		LoadImage: a.images.load,
@@ -145,4 +144,26 @@ func (a *readerWindow) releaseImages() {
 		a.images = nil
 	}
 	a.md = nil
+}
+
+// Hold a slot through both read and preparation; queued windows do not retain
+// file contents. Timeout applies to this operation, not the image-store lifetime.
+func loadReaderDocument(parent context.Context, path string, resources *applicationResources) (string, preparedReaderDocument, error) {
+	ctx, cancel := context.WithTimeout(parent, document.NativeLimits().Timeout)
+	defer cancel()
+	if err := acquireWork(ctx, resources.loads); err != nil {
+		return "", preparedReaderDocument{}, err
+	}
+	defer func() { <-resources.loads }()
+	started := time.Now()
+	source, err := document.LoadContext(ctx, path)
+	diagnostics.Record(ctx, "native.read", started, len(source))
+	if err != nil {
+		return "", preparedReaderDocument{}, err
+	}
+	prepared, err := prepareReaderDocument(ctx, source)
+	if err != nil {
+		return "", preparedReaderDocument{}, err
+	}
+	return source, prepared, nil
 }

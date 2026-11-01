@@ -22,6 +22,17 @@ CGO_ENABLED=0 go test -run '^$' -bench 'Benchmark(NativePrepare|PreviewRender|Pr
 
 解析完成后立即取消的约 1 MiB 文本基准为约 1.12 ms/op、8.30 MiB/op。这是当前语料的解析阶段成本，不能解释为所有文档的取消延迟上限。
 
+## 原生预处理优化对照
+
+2026-11-01，在同一 Apple M4 上用 `-benchtime=20x -count=3` 对照优化前 HEAD 的临时导出与当前工作区，以下耗时为三次采样的中位数。两次测试顺序执行，结果是本地样本，不是稳定的性能保证；分配为累计分配量，不是 RSS。测量仍不包含 MyGo UI 端解析/布局。
+
+| 场景 | 原耗时 ms/op | 当前耗时 ms/op | 原累计分配 MiB/op | 当前累计分配 MiB/op |
+| --- | ---: | ---: | ---: | ---: |
+| 500 个表格 | 0.912 | 0.687 | 8.52 | 3.19 |
+| 500 个 HTML 对齐容器 | 2.781 | 1.562 | 26.95 | 8.83 |
+
+改善来自复用 HTML 转换所需解析、删除块间空隙解析、按片段使用情况恢复引用定义，并跳过无方括号块的 inline 引用扫描。原生 MyGo 视图及嵌套片段的 UI 端解析仍然保留。
+
 ## 从测量确定的限制
 
 多段落文本的 DOM 和过滤链路存在明显的分配放大，因此在 Markdown 解析完成后、生成 HTML/DOM 前检查 20,000 个解析块的上限（包括解析器根块）。生成的中间 HTML 与最终 HTML 均受 64 MiB 限制，最终输出通过有界写入器组装。超限以稳定错误码 8 返回，不输出半份文档。单文件输入仍限于 32 MiB。
@@ -35,3 +46,11 @@ Quick Look 最多渲染前 128 个 Mermaid 围栏。图表源码和复杂度仍�
 在终端开发启动时设置 `MDFLICK_TRACE=1`，Go 输出 `pipeline stage=... elapsed=... bytes=...`，包含原生读取/预处理、Quick Look 解析、Markdown 转 HTML、DOM、过滤、输出以及 C 桥接的输入解码/输出复制。记录不包含文档路径或正文。
 
 Swift 使用 OSLog 的 `com.mdflick.app.QuickLook` / `Preview` 分类记录排队、读取、桥接、WebKit 载入、图表完成耗时。调试时在 Console 中启用对应 debug 日志；错误详情使用 private 隐私级别。HTML 提交成功与图表执行完成分别记录，都不能直接当成首屏像素时间。实际 Finder 快速切换、WebKit 布局、主题切换和图表耗时仍需安装后验证。
+
+## 原生处理与应用总量限制
+
+原生加载的 15 秒期限包含应用槽位排队、读取和预处理；应用最多执行两个加载任务。`ProcessingLimits` 由共享文档包提供，原文与转换后解析结果各最多 20,000 块，转换后 Markdown 最多 64 MiB，派生片段累计最多 64 MiB；取消和超限不发布部分文档。图片资源生命周期使用会话 context，与加载操作的期限分离。
+
+图表仍每窗口一个 WebView/串行 worker，应用最多两个 worker 进入渲染调用，缓存估算预算每文档 64 MiB、全应用 128 MiB。槽位在 Go 调用返回时释放，超时的 JavaScript 仍可能继续执行；这不是 WebKit 执行或进程峰值内存的硬限制。
+
+`MDFLICK_TRACE=1` 还可记录 `native.parse`、`native.html`、`native.fragments`；其中 fragments 的 bytes 是派生片段的累计字节数。

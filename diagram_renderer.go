@@ -33,17 +33,18 @@ type diagramRenderer struct {
 	ready  chan struct{}
 	once   sync.Once
 	jobs   chan diagramJob
+	slots  chan struct{}
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func newDiagramRenderer(win *mygo.Window) (*diagramRenderer, error) {
+func newDiagramRenderer(win *mygo.Window, slots chan struct{}) (*diagramRenderer, error) {
 	web, err := win.NewWebView(mygo.WebViewOptions{URL: "about:blank", Page: mygo.PageOptions{Untrusted: true}})
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &diagramRenderer{web: web, ready: make(chan struct{}), ctx: ctx, cancel: cancel, jobs: make(chan diagramJob, 16)}
+	r := &diagramRenderer{slots: slots, web: web, ready: make(chan struct{}), ctx: ctx, cancel: cancel, jobs: make(chan diagramJob, 16)}
 	go r.work()
 	web.Page().OnDidFinishLoad(func() {
 		go func() {
@@ -145,7 +146,14 @@ func (r *diagramRenderer) run(render func(context.Context, diagramKey) diagramRe
 		case job := <-r.jobs:
 			result := diagramResult{err: job.ctx.Err()}
 			if result.err == nil {
-				result = render(job.ctx, job.key)
+				if r.slots == nil {
+					result = render(job.ctx, job.key)
+				} else if err := acquireWork(job.ctx, r.slots); err != nil {
+					result.err = err
+				} else {
+					result = render(job.ctx, job.key)
+					<-r.slots
+				}
 			}
 			job.cancel()
 			if r.ctx.Err() == nil {

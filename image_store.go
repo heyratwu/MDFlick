@@ -28,8 +28,6 @@ type imageResources struct {
 	slots       chan struct{}
 }
 
-var applicationImages = &imageResources{limit: applicationImageBudget, slots: make(chan struct{}, 4)}
-
 type imageEntry struct {
 	done  chan struct{}
 	image ui.ImageSource
