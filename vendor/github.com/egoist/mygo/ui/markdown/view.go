@@ -31,6 +31,10 @@ type Options struct {
 	// views to show; until it has, they show its description. Without
 	// it, images show as their descriptions. FileImages loads files.
 	LoadImage func(url string) (ui.ImageSource, error)
+	// ResolveImage overrides LoadImage and its internal cache. It must return
+	// immediately, using an application-owned cache and scheduler. box is this
+	// image's container; it may be bound to a Handle but must not be retained.
+	ResolveImage func(c *ui.Context, url string, box ui.Element) ui.ImageSource
 
 	// CodeBlock, when set, builds code blocks in place of DefaultCodeBlock,
 	// which it can call to wrap it; Code builds the code blocks of the

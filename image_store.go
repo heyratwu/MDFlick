@@ -23,7 +23,7 @@ const (
 var errImageBudget = errors.New("图片缓存已达上限，重新载入可重试")
 
 // Account for active document caches. This is an estimate, not a limit on total
-// process/GPU memory. No eviction: MyGo Options also retain image references.
+// process/GPU memory. Completed images keep their geometry until reload.
 type imageResources struct {
 	mu          sync.Mutex
 	used, limit int64
@@ -108,7 +108,12 @@ func acquireImageSlot(ctx context.Context, slots chan struct{}) error {
 }
 
 func (s *imageStore) load(source string) (ui.ImageSource, error) {
-	if err := s.ctx.Err(); err != nil {
+	return s.loadContext(s.ctx, source)
+}
+
+// A viewport job may be cancelled without closing the document cache.
+func (s *imageStore) loadContext(ctx context.Context, source string) (ui.ImageSource, error) {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if !document.NativePolicy().AllowsImage(source) {
@@ -127,12 +132,12 @@ func (s *imageStore) load(source string) (ui.ImageSource, error) {
 		s.mu.Unlock()
 		select {
 		case <-entry.done:
-			if err := s.ctx.Err(); err != nil {
+			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			return entry.image, entry.err
-		case <-s.ctx.Done():
-			return nil, s.ctx.Err()
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 	}
 	if len(s.entries) >= s.maxEntries {
@@ -143,39 +148,44 @@ func (s *imageStore) load(source string) (ui.ImageSource, error) {
 	s.entries[key] = entry
 	s.mu.Unlock()
 
-	image, err := s.loadOnce(key)
+	image, err := s.loadOnce(ctx, key)
 	s.mu.Lock()
-	if s.closed || s.ctx.Err() != nil {
+	if s.closed {
 		image, err = nil, context.Canceled
 	}
 	entry.image, entry.err = image, err
+	// A scroll cancellation is retryable when the image returns to the viewport.
+	// Delete only our own entry, before waking any duplicate waiter.
+	if errors.Is(err, context.Canceled) && s.entries[key] == entry {
+		delete(s.entries, key)
+	}
 	close(entry.done)
 	s.mu.Unlock()
 	return image, err
 }
 
-func (s *imageStore) loadOnce(key string) (ui.ImageSource, error) {
+func (s *imageStore) loadOnce(ctx context.Context, key string) (ui.ImageSource, error) {
 	started := time.Now()
 	defer func() {
-		diagnostics.Record(s.ctx, "native.image-load-decode", started, 0)
+		diagnostics.Record(ctx, "native.image-load-decode", started, 0)
 		diagnostics.Memory("native.image-load-decode")
 	}()
-	if err := acquireImageSlot(s.ctx, s.slots); err != nil {
+	if err := acquireImageSlot(ctx, s.slots); err != nil {
 		return nil, err
 	}
 	defer func() { <-s.slots }()
-	if err := acquireImageSlot(s.ctx, s.resources.slots); err != nil {
+	if err := acquireImageSlot(ctx, s.resources.slots); err != nil {
 		return nil, err
 	}
 	defer func() { <-s.resources.slots }()
-	if err := s.ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	var reserved int64
 	reserve := func(bytes int64) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.closed || s.ctx.Err() != nil {
+		if s.closed || ctx.Err() != nil {
 			return context.Canceled
 		}
 		s.resources.mu.Lock()
@@ -188,9 +198,9 @@ func (s *imageStore) loadOnce(key string) (ui.ImageSource, error) {
 		reserved += bytes
 		return nil
 	}
-	image, err := loadDocumentImage(s.ctx, s.dir, key, reserve)
+	image, err := loadDocumentImage(ctx, s.dir, key, reserve)
 	if err == nil {
-		err = s.ctx.Err()
+		err = ctx.Err()
 	}
 	if err != nil {
 		s.mu.Lock()
@@ -204,4 +214,26 @@ func (s *imageStore) loadOnce(key string) (ui.ImageSource, error) {
 		return nil, err
 	}
 	return image, nil
+}
+
+// peek never admits a URL or starts work. Only dispatched jobs occupy entries.
+func (s *imageStore) peek(key string) (ui.ImageSource, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[key]
+	if entry == nil {
+		return nil, false
+	}
+	select {
+	case <-entry.done:
+		return entry.image, true
+	default:
+		return nil, false
+	}
+}
+
+func (s *imageStore) canAdmit(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.closed && (s.entries[key] != nil || len(s.entries) < s.maxEntries)
 }

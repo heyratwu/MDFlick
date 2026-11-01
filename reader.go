@@ -17,16 +17,17 @@ type readerWindow struct {
 	onLink    func(string)
 	resources *applicationResources
 	documentSession
-	images      *imageStore
-	win         *mygo.Window
-	md          *markdown.Options
-	diagrams    *diagramService
-	blockIndent float32
-	scroll      ui.ScrollState
-	html        readerHTMLState
-	open        func()
-	performance readerPerformance
-	openStarted time.Time
+	images         *imageStore
+	imageScheduler *imageScheduler
+	win            *mygo.Window
+	md             *markdown.Options
+	diagrams       *diagramService
+	blockIndent    float32
+	scroll         ui.ScrollState
+	html           readerHTMLState
+	open           func()
+	performance    readerPerformance
+	openStarted    time.Time
 }
 
 func (a *readerWindow) view(c *ui.Context) {
@@ -60,6 +61,8 @@ func (a *readerWindow) view(c *ui.Context) {
 			a.md.CodeBlock = a.codeBlock
 			a.md.BlockStyle = a.readerBlockStyle
 			a.md.OnLink = a.linkHandler(c)
+			finishImages := a.beginImageFrame(c)
+			defer finishImages()
 			left, prose, _ := readerWidths(c)
 			ui.Scroll(c).Key(struct {
 				Path       string
@@ -149,6 +152,7 @@ func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
 		a.resources = newApplicationResources()
 	}
 	a.images = newImageStore(ctx, path, a.resources.images)
+	a.imageScheduler = newImageScheduler(a.images)
 	a.md = &markdown.Options{
 		Code:      map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock},
 		LoadImage: a.images.load,
@@ -156,6 +160,7 @@ func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
 }
 
 func (a *readerWindow) releaseImages() {
+	a.imageScheduler = nil
 	if a.images != nil {
 		a.images.close()
 		a.images = nil

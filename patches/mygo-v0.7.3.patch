@@ -61,7 +61,18 @@
 +}
 --- a/vendor/github.com/egoist/mygo/ui/markdown/view.go
 +++ b/vendor/github.com/egoist/mygo/ui/markdown/view.go
-@@ -58,6 +58,9 @@
+@@ -31,6 +31,10 @@
+ 	// views to show; until it has, they show its description. Without
+ 	// it, images show as their descriptions. FileImages loads files.
+ 	LoadImage func(url string) (ui.ImageSource, error)
++	// ResolveImage overrides LoadImage and its internal cache. It must return
++	// immediately, using an application-owned cache and scheduler. box is this
++	// image's container; it may be bound to a Handle but must not be retained.
++	ResolveImage func(c *ui.Context, url string, box ui.Element) ui.ImageSource
+ 
+ 	// CodeBlock, when set, builds code blocks in place of DefaultCodeBlock,
+ 	// which it can call to wrap it; Code builds the code blocks of the
+@@ -58,6 +62,9 @@
  	// Block, when set, is asked first for each block, and builds it in
  	// its place when it returns true.
  	Block func(c *ui.Context, d *parser.Document, i int) bool
@@ -71,7 +82,7 @@
  
  	// Reveal is how Stream shows text as it comes: DefaultReveal when nil.
  	Reveal *Reveal
-@@ -88,7 +91,18 @@
+@@ -88,7 +95,18 @@
  //
  //	markdown.View(c, app.readme, &app.md)
  func View(c *ui.Context, src string, o *Options) ui.Element {
@@ -91,7 +102,7 @@
  }
  
  // Stream shows src, Markdown still being written, as a language model's
-@@ -105,7 +119,7 @@
+@@ -105,7 +123,7 @@
  //		markdown.Stream(c, msg.text, &app.md)
  //	}
  func Stream(c *ui.Context, src string, o *Options) ui.Element {
@@ -100,7 +111,7 @@
  }
  
  // stateKey keys a view's state among its root's.
-@@ -150,7 +164,7 @@
+@@ -150,7 +168,7 @@
  
  func newState() *viewState { return &viewState{scrollTo: -1} }
  
@@ -109,7 +120,7 @@
  	if o == nil {
  		o = &defaultOptions
  	}
-@@ -158,8 +172,16 @@
+@@ -158,8 +176,16 @@
  	st := *ui.Local(root, stateKey{}, newState)
  	st.o = o
  	ext := o.Extensions
@@ -126,7 +137,7 @@
  	}
  	if st.doc == nil || st.ext != ext {
  		st.doc, st.ext = parser.New(ext), ext
-@@ -286,10 +308,15 @@
+@@ -286,10 +312,15 @@
  	o := st.o
  	th := &st.th
  	b := d.Block(i)
@@ -144,3 +155,73 @@
  		if done {
  			return box
  		}
+--- a/vendor/github.com/egoist/mygo/ui/markdown/image.go
++++ b/vendor/github.com/egoist/mygo/ui/markdown/image.go
+@@ -79,32 +79,42 @@
+ 				continue
+ 			}
+ 			alt := parser.PlainText(in[k+1 : n.Next])
+-			src := st.image(c, n.Dest)
+-			if src == nil || n.Pending {
+-				label := alt
+-				if label == "" {
+-					label = l10n.In(c.Locale()).Image()
+-				}
+-				ph := ui.Row(c).Padding(th.em(0.5), th.em(0.75)).Radius(th.em(0.3)).Background(th.CodeBackground)
+-				ph.Role(ui.RoleImage).Label(alt)
+-				ph.Children(func() { ui.Text(c, label).TextColor(th.Muted).FontSize(th.em(0.875)) })
+-				continue
+-			}
+-			img := ui.Image(c, src).Radius(th.em(0.3)).MaxWidthPercent(100).Label(alt)
+-			var w, h float32
+-			switch s := src.(type) {
+-			case *ui.Bitmap:
+-				iw, ih := s.Size()
+-				w, h = float32(iw), float32(ih)
+-			case *ui.SVG:
+-				w, h = s.Size()
+-			}
+-			if w > 0 && h > 0 {
+-				img.AspectRatio(w / h)
+-			}
+-			if n.Title != "" {
+-				img.Tooltip(n.Title)
++			if st.o.ResolveImage != nil {
++				box := ui.Column(c).MaxWidthPercent(100)
++				src := st.o.ResolveImage(c, n.Dest, box)
++				box.Children(func() { st.imageContent(c, n, alt, src) })
++			} else {
++				st.imageContent(c, n, alt, st.image(c, n.Dest))
+ 			}
+ 		}
+ 	})
+ }
++
++func (st *viewState) imageContent(c *ui.Context, n *parser.Inline, alt string, src ui.ImageSource) {
++	th := &st.th
++	if src == nil || n.Pending {
++		label := alt
++		if label == "" {
++			label = l10n.In(c.Locale()).Image()
++		}
++		ph := ui.Row(c).Padding(th.em(0.5), th.em(0.75)).Radius(th.em(0.3)).Background(th.CodeBackground)
++		ph.Role(ui.RoleImage).Label(alt)
++		ph.Children(func() { ui.Text(c, label).TextColor(th.Muted).FontSize(th.em(0.875)) })
++		return
++	}
++	img := ui.Image(c, src).Radius(th.em(0.3)).MaxWidthPercent(100).Label(alt)
++	var w, h float32
++	switch s := src.(type) {
++	case *ui.Bitmap:
++		iw, ih := s.Size()
++		w, h = float32(iw), float32(ih)
++	case *ui.SVG:
++		w, h = s.Size()
++	}
++	if w > 0 && h > 0 {
++		img.AspectRatio(w / h)
++	}
++	if n.Title != "" {
++		img.Tooltip(n.Title)
++	}
++}

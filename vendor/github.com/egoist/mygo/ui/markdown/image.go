@@ -79,32 +79,42 @@ func (st *viewState) images(c *ui.Context, i int) ui.Element {
 				continue
 			}
 			alt := parser.PlainText(in[k+1 : n.Next])
-			src := st.image(c, n.Dest)
-			if src == nil || n.Pending {
-				label := alt
-				if label == "" {
-					label = l10n.In(c.Locale()).Image()
-				}
-				ph := ui.Row(c).Padding(th.em(0.5), th.em(0.75)).Radius(th.em(0.3)).Background(th.CodeBackground)
-				ph.Role(ui.RoleImage).Label(alt)
-				ph.Children(func() { ui.Text(c, label).TextColor(th.Muted).FontSize(th.em(0.875)) })
-				continue
-			}
-			img := ui.Image(c, src).Radius(th.em(0.3)).MaxWidthPercent(100).Label(alt)
-			var w, h float32
-			switch s := src.(type) {
-			case *ui.Bitmap:
-				iw, ih := s.Size()
-				w, h = float32(iw), float32(ih)
-			case *ui.SVG:
-				w, h = s.Size()
-			}
-			if w > 0 && h > 0 {
-				img.AspectRatio(w / h)
-			}
-			if n.Title != "" {
-				img.Tooltip(n.Title)
+			if st.o.ResolveImage != nil {
+				box := ui.Column(c).MaxWidthPercent(100)
+				src := st.o.ResolveImage(c, n.Dest, box)
+				box.Children(func() { st.imageContent(c, n, alt, src) })
+			} else {
+				st.imageContent(c, n, alt, st.image(c, n.Dest))
 			}
 		}
 	})
+}
+
+func (st *viewState) imageContent(c *ui.Context, n *parser.Inline, alt string, src ui.ImageSource) {
+	th := &st.th
+	if src == nil || n.Pending {
+		label := alt
+		if label == "" {
+			label = l10n.In(c.Locale()).Image()
+		}
+		ph := ui.Row(c).Padding(th.em(0.5), th.em(0.75)).Radius(th.em(0.3)).Background(th.CodeBackground)
+		ph.Role(ui.RoleImage).Label(alt)
+		ph.Children(func() { ui.Text(c, label).TextColor(th.Muted).FontSize(th.em(0.875)) })
+		return
+	}
+	img := ui.Image(c, src).Radius(th.em(0.3)).MaxWidthPercent(100).Label(alt)
+	var w, h float32
+	switch s := src.(type) {
+	case *ui.Bitmap:
+		iw, ih := s.Size()
+		w, h = float32(iw), float32(ih)
+	case *ui.SVG:
+		w, h = s.Size()
+	}
+	if w > 0 && h > 0 {
+		img.AspectRatio(w / h)
+	}
+	if n.Title != "" {
+		img.Tooltip(n.Title)
+	}
 }

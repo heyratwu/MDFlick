@@ -206,6 +206,7 @@ func TestReaderImagesShareStoreAndRefreshNestedBlocks(t *testing.T) {
 	defer server.Close()
 	source := "![outer](" + server.URL + "/image)\n\n<div align=center>\n\n![aligned](" + server.URL + "/image)\n\n</div>\n\n| Image |\n|---|\n| ![table](" + server.URL + "/image) |\n"
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/images.md", source: source}}
+	t.Cleanup(a.releaseImages)
 	a.resetMarkdown(context.Background(), a.path)
 	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 1000, 900)
