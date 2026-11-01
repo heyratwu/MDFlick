@@ -28,3 +28,19 @@ func (s *documentSession) close() {
 		s.cancel()
 	}
 }
+
+// complete is the publication boundary for asynchronous reads. A stale success
+// or failure must not alter the current session, including its loading state.
+func (s *documentSession) complete(version uint64, source string, err error) bool {
+	if !s.accepts(version) {
+		return false
+	}
+	s.loading = false
+	if err != nil {
+		s.failure = err.Error()
+	} else {
+		s.failure = ""
+		s.source = source
+	}
+	return true
+}

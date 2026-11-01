@@ -22,7 +22,7 @@ xcrun swiftc -module-name MDFlickQuickLook -parse-as-library -emit-executable \
   -framework Cocoa -framework QuickLookUI -framework WebKit \
   -Xlinker -e -Xlinker _NSExtensionMain \
   -import-objc-header "$renderer.h" "$renderer.a" \
-  macos/QuickLook/PreviewViewController.swift -o "$extension/Contents/MacOS/MDFlickQuickLook"
+  macos/QuickLook/PreviewBridge.swift macos/QuickLook/PreviewViewController.swift -o "$extension/Contents/MacOS/MDFlickQuickLook"
 codesign --force --options runtime --sign "$identity" --entitlements macos/QuickLook/entitlements.plist "$extension"
 codesign --force --options runtime --sign "$identity" "$app"
 codesign --verify --deep --strict "$app"

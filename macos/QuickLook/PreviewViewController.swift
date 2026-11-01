@@ -50,20 +50,10 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
                 let input = try FileHandle(forReadingFrom: url)
                 defer { try? input.close() }
                 stage = "render document"
-                let data = try input.read(upToCount: (32 << 20) + 1) ?? Data()
-                guard data.count <= (32 << 20) else {
-                    throw NSError(domain: "MDFlick", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件超过 32 MB，无法预览。"])
-                }
+                let data = try input.read(upToCount: PreviewBridge.maxSize + 1) ?? Data()
                 try token.check()
-                let rendered = data.withUnsafeBytes { bytes in
-                    MDPreviewHTML(UnsafeMutablePointer(mutating: bytes.baseAddress?.assumingMemoryBound(to: CChar.self)), Int32(data.count))
-                }
-                guard let rendered else {
-                    throw NSError(domain: "MDFlick", code: 1, userInfo: [NSLocalizedDescriptionKey: "请使用 UTF-8 编码的 Markdown 文件。"])
-                }
-                defer { free(rendered) }
+                let html = try PreviewBridge.render(data)
                 try token.check()
-                let html = String(cString: rendered)
                 DispatchQueue.main.async {
                     guard let self, self.generation == request else { handler(CocoaError(.userCancelled)); return }
                     self.webView.loadHTMLString(html, baseURL: nil)

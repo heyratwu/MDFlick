@@ -20,11 +20,26 @@
 go tool mygo dev
 CGO_ENABLED=0 go test ./...
 go tool mygo vet .
+go test -race ./...
+bash scripts/test-macos-bridge.sh  # macOS：实际 Swift/C/Go 边界测试
 ```
 
 主窗口使用 `ui/markdown.View`，通过 `Options.Code["mermaid"]` 将图表交给隐藏的 WKWebView 异步生成高清图片，按源码和主题缓存，并保留复制源码按钮。Quick Look 使用同一 MyGo Markdown parser 生成经过过滤的 HTML，通过 Swift / WKWebView 展示；CSP 仅授权内置 Mermaid 脚本，不执行文档脚本、不请求网络资源。快速预览保留表格、代码和任务列表；代码按等宽字体显示，图片显示替代文字。完整窗口支持代码语法高亮和本地图片。当前锁定的 MyGo 版本不自动处理相对文档链接。
 
 Mermaid 使用内置的 11.4.1 运行时，无需安装 Node.js 或联网。可打开 [示例文档](docs/examples/mermaid.md) 查看流程图、时序图和错误回退。单个图表最多 50,000 字符、500 条边；过大或不支持的图表会回退显示源码。每个主窗口使用一个 Mermaid 渲染 worker，最多排队 16 项，15 秒期限包含排队时间；按源码和主题最多保留 128 项结果，解码图片按 RGBA 像素估算的缓存预算为 64 MiB。队列或预算达到上限时显示源码，重新载入会清空缓存。为避免每帧重建引发重复渲染，不自动淘汰已完成项。第三方运行时版本与许可证见 [internal/mermaid](internal/mermaid/README.md)。
+
+主窗口与 Quick Look 共享 32 MiB / UTF-8（允许 BOM）规则、校验错误码和 Mermaid 代码块判定。普通文本中的 `mermaid` 不会启动渲染器；只有大小写匹配的 `mermaid` 围栏代码块参与渲染，未闭合围栏保留源码。更多验证说明见 [测试说明](docs/testing.md)。
+
+| 能力 | 主窗口 | Quick Look |
+| --- | --- | --- |
+| 标题、列表、表格、任务列表 | 原生 Markdown | 过滤后的 HTML |
+| Mermaid | 离线生成 PNG，失败显示源码 | 离线 SVG，失败显示源码 |
+| 系统深浅色 | 支持 | 支持 |
+| 代码语法高亮 | 支持 | 等宽文本 |
+| 本地图片 | 有大小与像素限制的异步加载 | 显示替代文字 |
+| 外部网页链接 | 交给默认浏览器 | 禁止外部导航 |
+| 相对文档链接 | 当前版本不处理 | 禁止外部导航 |
+| 文档脚本、远程图片请求 | 不执行 / 不加载 | 不执行 / 不加载 |
 
 ## 构建 macOS 安装包
 

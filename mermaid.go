@@ -125,10 +125,7 @@ func (a *readerWindow) mermaidBlock(c *ui.Context, b *markdown.CodeBlockView) {
 		a.diagrams[key] = nil
 		accepted := renderer.submit(key, func(rendered diagramResult) {
 			win.Update(func() {
-				if !a.accepts(generation) || a.renderer != renderer {
-					return
-				}
-				a.storeDiagram(key, rendered)
+				a.commitDiagram(generation, renderer, key, rendered)
 			})
 		})
 		if !accepted {
@@ -180,7 +177,9 @@ func (r *diagramRenderer) submit(key diagramKey, done func(diagramResult)) bool 
 		return false
 	}
 }
-func (r *diagramRenderer) work() {
+func (r *diagramRenderer) work() { r.run(r.render) }
+
+func (r *diagramRenderer) run(render func(context.Context, diagramKey) diagramResult) {
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -193,7 +192,10 @@ func (r *diagramRenderer) work() {
 				}
 			}
 		case job := <-r.jobs:
-			result := r.render(job.ctx, job.key)
+			result := diagramResult{err: job.ctx.Err()}
+			if result.err == nil {
+				result = render(job.ctx, job.key)
+			}
 			job.cancel()
 			if r.ctx.Err() == nil {
 				job.done(result)
@@ -207,4 +209,11 @@ func (a *readerWindow) storeDiagram(key diagramKey, result diagramResult) {
 	}
 	a.diagramBytes += result.bytes
 	a.diagrams[key] = &result
+}
+
+func (a *readerWindow) commitDiagram(generation uint64, renderer *diagramRenderer, key diagramKey, result diagramResult) {
+	if !a.accepts(generation) || a.renderer != renderer {
+		return
+	}
+	a.storeDiagram(key, result)
 }

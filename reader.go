@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"path/filepath"
-	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -70,18 +69,19 @@ func (a *readerWindow) load() {
 		if ctx.Err() != nil {
 			return
 		}
+		hasMermaid := document.DetectMermaid(source)
+		if ctx.Err() != nil {
+			return
+		}
 		win.Update(func() {
-			if !a.accepts(generation) {
+			if !a.complete(generation, source, err) {
 				return
 			}
-			a.loading = false
 			if err != nil {
-				a.failure = err.Error()
 				return
 			}
-			a.source = source
 			a.resetMarkdown(ctx, path)
-			if strings.Contains(source, "mermaid") {
+			if hasMermaid {
 				var renderErr error
 				a.renderer, renderErr = newDiagramRenderer(a.win)
 				if renderErr != nil {

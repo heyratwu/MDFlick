@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"mdflick/internal/testfixtures"
 	"strings"
 	"testing"
 )
@@ -34,5 +35,33 @@ func TestMermaidOfflineAndEscaping(t *testing.T) {
 	plain := HTML("```go\nprintln(1)\n```\n")
 	if strings.Contains(plain, "<script>") || strings.Contains(plain, `class="mermaid-source"`) {
 		t.Fatal("ordinary code interpreted as Mermaid")
+	}
+}
+
+func TestSharedCorpus(t *testing.T) {
+	for _, tc := range testfixtures.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got := HTML(tc.Source)
+			if count := strings.Count(got, `class="mermaid-source"`); count != tc.MermaidBlocks {
+				t.Fatalf("marked %d code blocks, expected %d", count, tc.MermaidBlocks)
+			}
+			if scripts := strings.Contains(got, "<script>"); scripts != (tc.MermaidBlocks > 0) {
+				t.Fatal("runtime does not match native detection")
+			}
+			if tc.Name == "reader" {
+				for _, want := range []string{"共同标题", "<table>", "checkbox", "println", `href="#%E5%85%B1%E5%90%8C%E6%A0%87%E9%A2%98"`} {
+					if !strings.Contains(got, want) {
+						t.Errorf("missing %q", want)
+					}
+				}
+			}
+			if tc.Name == "passive" {
+				for _, bad := range []string{"<script>", "onerror", "javascript:", "https://example.com"} {
+					if strings.Contains(got, bad) {
+						t.Errorf("active content survived: %s", bad)
+					}
+				}
+			}
+		})
 	}
 }

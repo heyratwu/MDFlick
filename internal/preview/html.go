@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui/markdown/parser"
 	"golang.org/x/net/html"
+	"mdflick/internal/document"
 	"mdflick/internal/mermaid"
 )
 
@@ -14,7 +15,27 @@ import (
 // Raw HTML, active URLs, remote images and CSS from documents cannot execute
 // or contact the network inside Quick Look.
 func HTML(source string) string {
-	root, _ := html.Parse(strings.NewReader(parser.Parse(source).HTML()))
+	parsed := parser.Parse(source)
+	var codeBlocks []bool
+	for i := 0; i < parsed.Len(); i++ {
+		if parsed.Block(i).Kind != parser.CodeBlock {
+			continue
+		}
+		// HTML moves footnote definitions into a section that this passive
+		// adapter omits. Do not let their blocks shift ordinary code markers.
+		inFootnote := false
+		for parent := parsed.Block(i).Parent; parent >= 0; parent = parsed.Block(parent).Parent {
+			if parsed.Block(parent).Kind == parser.FootnoteDefinition {
+				inFootnote = true
+				break
+			}
+		}
+		if !inFootnote {
+			codeBlocks = append(codeBlocks, document.IsMermaid(parsed.Block(i)))
+		}
+	}
+	codeIndex := 0
+	root, _ := html.Parse(strings.NewReader(parsed.HTML()))
 	var body bytes.Buffer
 	var sanitize func(*html.Node, *html.Node)
 	allowed := " p h1 h2 h3 h4 h5 h6 hr pre code blockquote ul ol li strong em del a img table thead tbody tr th td br sup sub input div span "
@@ -33,14 +54,12 @@ func HTML(source string) string {
 			return
 		}
 		clean := &html.Node{Type: html.ElementNode, Data: n.Data, DataAtom: n.DataAtom}
-		// Only parser-generated fenced Mermaid blocks receive this marker.
-		// Raw document HTML is escaped by the Markdown parser.
+		// Only parser code blocks receive a marker; raw HTML stays escaped.
 		if n.Data == "pre" && n.FirstChild != nil && n.FirstChild.Data == "code" {
-			for _, attr := range n.FirstChild.Attr {
-				if attr.Key == "class" && attr.Val == "language-mermaid" {
-					clean.Attr = append(clean.Attr, html.Attribute{Key: "class", Val: "mermaid-source"})
-				}
+			if codeIndex < len(codeBlocks) && codeBlocks[codeIndex] {
+				clean.Attr = append(clean.Attr, html.Attribute{Key: "class", Val: "mermaid-source"})
 			}
+			codeIndex++
 		}
 		for _, a := range n.Attr {
 			switch a.Key {
@@ -70,7 +89,7 @@ func HTML(source string) string {
 		_ = html.Render(&body, c)
 	}
 	scripts, policy := "", ""
-	if strings.Contains(body.String(), `class="mermaid-source"`) {
+	if document.HasMermaid(parsed) {
 		scripts, policy = mermaid.Scripts()
 	}
 	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>

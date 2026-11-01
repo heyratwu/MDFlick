@@ -2,7 +2,6 @@ package document
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,11 +17,11 @@ func Read(r io.Reader) (string, error) {
 		return "", err
 	}
 	if len(b) > MaxSize {
-		return "", fmt.Errorf("文件超过 32 MB，无法预览")
+		return "", TooLarge
 	}
 	b = []byte(strings.TrimPrefix(string(b), "\ufeff"))
 	if !utf8.Valid(b) {
-		return "", fmt.Errorf("请使用 UTF-8 编码的 Markdown 文件")
+		return "", InvalidUTF8
 	}
 	return string(b), nil
 }
@@ -37,7 +36,7 @@ func LoadContext(ctx context.Context, path string) (string, error) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".md", ".markdown":
 	default:
-		return "", fmt.Errorf("仅支持 .md 和 .markdown 文件")
+		return "", UnsupportedExtension
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -49,7 +48,7 @@ func LoadContext(ctx context.Context, path string) (string, error) {
 		return "", err
 	}
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("请选择普通 Markdown 文件")
+		return "", NotRegular
 	}
 	return Read(contextReader{ctx, f})
 }
