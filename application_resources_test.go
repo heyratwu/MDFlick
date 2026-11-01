@@ -41,59 +41,6 @@ func TestLoadAdmissionAndCancellation(t *testing.T) {
 	}
 }
 
-func TestDiagramWorkersShareSlots(t *testing.T) {
-	slots := make(chan struct{}, 1)
-	started := make(chan struct{}, 2)
-	release := make(chan struct{})
-	results := make(chan diagramResult, 2)
-	render := func(ctx context.Context, _ diagramKey) diagramResult {
-		started <- struct{}{}
-		select {
-		case <-release:
-			return diagramResult{}
-		case <-ctx.Done():
-			return diagramResult{err: ctx.Err()}
-		}
-	}
-	makeWorker := func() *diagramRenderer {
-		ctx, cancel := context.WithCancel(context.Background())
-		r := &diagramRenderer{ctx: ctx, cancel: cancel, jobs: make(chan diagramJob, 1), slots: slots}
-		stopped := make(chan struct{})
-		go func() { r.run(render); close(stopped) }()
-		t.Cleanup(func() {
-			cancel()
-			select {
-			case <-stopped:
-			case <-time.After(time.Second):
-				t.Error("worker did not exit")
-			}
-		})
-		return r
-	}
-	first, second := makeWorker(), makeWorker()
-	first.submit(diagramKey{}, func(r diagramResult) { results <- r })
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("worker did not start")
-	}
-	second.submit(diagramKey{}, func(r diagramResult) { results <- r })
-	// Cancel the second window while the application slot is still occupied.
-	// The shared slot remains occupied until the first render completes.
-	second.cancel()
-	close(release)
-	select {
-	case <-results:
-	case <-time.After(time.Second):
-		t.Fatal("result missing")
-	}
-	select {
-	case <-started:
-		t.Fatal("cancelled second render executed")
-	default:
-	}
-}
-
 func TestDiagramApplicationBudget(t *testing.T) {
 	budget := &byteBudget{limit: 12}
 	firstBackend, secondBackend := &fakeDiagramBackend{}, &fakeDiagramBackend{}

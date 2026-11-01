@@ -69,6 +69,10 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 	a.win.OnClosed(func() {
 		a.close()
 		delete(manager.windows, a.path)
+		if len(manager.windows) == 0 && manager.resources.diagramPool != nil {
+			manager.resources.diagramPool.close()
+			manager.resources.diagramPool = nil
+		}
 	})
 	if path != "" {
 		a.load()

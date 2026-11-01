@@ -27,7 +27,8 @@ const MaxBlocks = document.MaxBlocks
 type limits struct{ outputBytes, diagrams int }
 
 // Render produces a bounded passive preview. Cancellation is cooperative:
-// parser.Parse and parser.HTML are synchronous, with checks between stages.
+// Parsing remains synchronous. Passive AST output checks cancellation while
+// writing; raw HTML uses the full-document DOM sanitizer.
 func Render(ctx context.Context, source string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
@@ -54,11 +55,21 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 	if parsed.Len() > MaxBlocks {
 		return "", document.ResourceLimit
 	}
+	started = time.Now()
 	var codeBlocks []bool
+	requiresDOM := false
 	diagrams := 0
 	for i := 0; i < parsed.Len(); i++ {
 		if err := ctx.Err(); err != nil {
 			return "", err
+		}
+		if parsed.Block(i).Kind == parser.HTMLBlock {
+			requiresDOM = true
+		}
+		for _, in := range parsed.Inlines(i) {
+			if in.Kind == parser.HTML || (parsed.Block(i).Kind == parser.Heading && in.Kind == parser.FootnoteRef) {
+				requiresDOM = true
+			}
 		}
 		if parsed.Block(i).Kind != parser.CodeBlock {
 			continue
@@ -79,6 +90,13 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 				diagrams++
 			}
 		}
+	}
+	diagnostics.Record(ctx, "preview.inspect", started, len(source))
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if !requiresDOM {
+		return renderDirect(ctx, parsed, limit, codeBlocks, diagrams)
 	}
 	started = time.Now()
 	generated := parsed.HTML()
@@ -108,13 +126,7 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 		return "", err
 	}
 	started = time.Now()
-	scripts, policy := "", ""
-	if diagrams > 0 {
-		scripts, policy = mermaid.Scripts()
-	}
-	head := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>` + typography.CSS() + `
-</style></head><body>`
-	const tail = `</body></html>`
+	head, scripts := previewEnvelope(diagrams)
 	fixedBytes := len(head) + len(scripts) + len(tail)
 	if fixedBytes > limit.outputBytes {
 		return "", document.ResourceLimit
@@ -197,4 +209,17 @@ func headingText(n *html.Node) string {
 	}
 	walk(n)
 	return text.String()
+}
+
+const tail = `</body></html>`
+
+func previewEnvelope(diagrams int) (head, scripts string) {
+	policy := ""
+	if diagrams > 0 {
+		scripts, policy = mermaid.Scripts()
+	}
+	head = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>` + typography.CSS() + `
+</style></head><body>`
+
+	return head, scripts
 }

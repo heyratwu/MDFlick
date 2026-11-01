@@ -103,13 +103,14 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         let request = generation
         let started = loadStarted
         logger.debug("Preview WebKit load: \(ProcessInfo.processInfo.systemUptime - started, privacy: .public)s")
-        // Completion above means HTML was submitted. Track diagram completion
-        // separately so these measurements do not claim to be first-paint time.
+        // Completion above means HTML was submitted. Track the initial viewport
+        // diagram batch separately; offscreen diagrams wait until visible.
+        // Neither event claims to measure first-paint time.
         webView.callAsyncJavaScript("await window.mdflickReady; return true", arguments: [:], in: nil, in: .page) { [weak self] result in
             guard let self, self.generation == request else { return }
             switch result {
             case .success:
-                self.logger.debug("Preview content ready: \(ProcessInfo.processInfo.systemUptime - started, privacy: .public)s")
+                self.logger.debug("Preview initial viewport diagrams ready: \(ProcessInfo.processInfo.systemUptime - started, privacy: .public)s")
             case .failure(let error):
                 self.logger.error("Preview content failed: \(String(describing: error), privacy: .private)")
             }

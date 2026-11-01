@@ -44,29 +44,61 @@ window.mdflickPNG = function(source, dark) {
   pngPending = result.catch(() => {});
   return result;
 };
-// Quick Look keeps the original code if a diagram fails to render.
-window.mdflickReady = (async function() {
-  const blocks = Array.from(document.querySelectorAll('pre.mermaid-source'));
+// Quick Look renders visible diagrams first. Offscreen blocks retain source;
+// theme changes invalidate them without executing Mermaid until they enter view.
+window.mdflickReady = (function() {
   const dark = matchMedia('(prefers-color-scheme: dark)');
-  async function render() {
-    for (let i = 0; i < blocks.length; i++) {
-      const block = blocks[i];
-      const code = block.dataset.source || block.textContent;
-      block.dataset.source = code;
-      try {
-        const svg = await window.mdflickSVG(code, dark.matches, 'diagram' + i);
-        block.innerHTML = svg;
-        block.classList.add('mermaid-rendered');
-        block.setAttribute('aria-label', 'Mermaid 图表');
-      } catch (_) {
-        block.textContent = code;
-        block.classList.remove('mermaid-rendered');
-        block.title = 'Mermaid 图表无法渲染，显示源码';
+  const states = Array.from(document.querySelectorAll('pre.mermaid-source'), (block, i) => ({
+    block, i, code: block.textContent, visible: false, rendered: undefined, failed: undefined
+  }));
+  let pending = Promise.resolve();
+  let queued = false;
+  function schedule() {
+    if (queued) return pending;
+    queued = true;
+    pending = pending.then(async () => {
+      queued = false;
+      for (const state of states) {
+        const theme = dark.matches;
+        if (!state.visible || state.rendered === theme || state.failed === theme) continue;
+        try {
+          const svg = await window.mdflickSVG(state.code, theme, 'diagram' + state.i);
+          // A theme switch while Mermaid runs supersedes this result.
+          if (theme !== dark.matches) continue;
+          state.block.innerHTML = svg;
+          state.block.classList.add('mermaid-rendered');
+          state.block.setAttribute('aria-label', 'Mermaid 图表');
+          state.block.removeAttribute('title');
+          state.rendered = theme;
+          state.failed = undefined;
+        } catch (_) {
+          if (theme !== dark.matches) continue;
+          state.block.textContent = state.code;
+          state.block.classList.remove('mermaid-rendered');
+          state.block.title = 'Mermaid 图表无法渲染，显示源码';
+          state.failed = theme;
+          state.rendered = undefined;
+        }
       }
-    }
+    });
+    return pending;
   }
-  // Serialize theme changes with ongoing Mermaid work.
-  let pending = render();
-  dark.addEventListener('change', () => { pending = pending.then(render); });
-  await pending;
+  for (const state of states) {
+    const box = state.block.getBoundingClientRect();
+    state.visible = box.top < innerHeight + 200 && box.bottom > -200;
+  }
+  if (states.length && typeof IntersectionObserver !== 'undefined') {
+    const byBlock = new Map(states.map(state => [state.block, state]));
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) byBlock.get(entry.target).visible = entry.isIntersecting;
+      schedule();
+    }, { rootMargin: '200px' });
+    for (const state of states) observer.observe(state.block);
+  } else {
+    // Compatibility fallback; current WKWebView supports IntersectionObserver.
+    for (const state of states) state.visible = true;
+  }
+  dark.addEventListener('change', schedule);
+  // Initial viewport readiness is deliberately independent of offscreen work.
+  return schedule();
 })();

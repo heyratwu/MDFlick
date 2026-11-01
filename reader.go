@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -23,6 +22,7 @@ type readerWindow struct {
 	md          *markdown.Options
 	diagrams    *diagramService
 	blockIndent float32
+	scroll      ui.ScrollState
 	html        readerHTMLState
 	open        func()
 	performance readerPerformance
@@ -64,7 +64,7 @@ func (a *readerWindow) view(c *ui.Context) {
 			ui.Scroll(c).Key(struct {
 				Path       string
 				Generation uint64
-			}{a.path, a.generation}).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
+			}{a.path, a.generation}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
 				ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(40, 0, 120, 0).FontWeight(400).Children(func() {
 					markdown.ViewDocument(c, a.prepared.parsed, a.md)
 					if a.source == "" {
@@ -90,6 +90,7 @@ func (a *readerWindow) load() {
 	}
 	a.openStarted = time.Time{}
 	ctx, generation := a.beginLoad()
+	a.scroll = ui.ScrollState{}
 	a.performance = readerPerformance{}
 	if diagnostics.Enabled() {
 		ctx = diagnostics.WithRequest(ctx)
@@ -114,12 +115,13 @@ func (a *readerWindow) load() {
 			a.html = readerHTMLState{}
 			a.resetMarkdown(ctx, path)
 			if prepared.hasMermaid && document.NativePolicy().Mermaid {
-				backend, renderErr := newDiagramRenderer(a.win, resources.diagrams)
-				if renderErr != nil {
-					log.Println("Mermaid:", renderErr)
-				} else {
-					a.diagrams = newDiagramService(backend, func(fn func()) { win.Update(fn) }, resources.diagramCache)
+				if resources.diagramPool == nil {
+					resources.diagramPool = newDiagramPool(resources.diagrams)
 				}
+				backend := newDiagramRenderer(a.win, resources.diagramPool)
+				a.diagrams = newDiagramService(backend, func(fn func()) {
+					win.Update(func() { fn(); resources.record("native.diagram-result") })
+				}, resources.diagramCache)
 			}
 			a.win.SetRepresentedFile(path)
 			_ = mygo.App.AddRecentDocument(path)

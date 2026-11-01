@@ -5,6 +5,7 @@ CGO_ENABLED=0 go test ./...
 go tool mygo vet .
 go test -race ./...
 bash scripts/test-macos-bridge.sh
+node --test internal/mermaid/render.test.cjs  # 仅 JS 调度测试需要 Node，应用运行不需要
 ```
 
 最后一项需要 macOS、Go CGO 与 Xcode Command Line Tools。脚本在临时目录构建当前 Go 静态库和 C 头文件，再链接 Swift 测试程序，执行后删除临时产物；同时对扩展控制器与桥接适配器进行类型检查。它不安装应用、不注册 Finder 扩展。
@@ -47,3 +48,11 @@ Quick Look DOM 优化另有回归测试，检查删除危险子树后相邻节�
 ## 仍需手动验证
 
 自动化测试不覆盖实际 WKWebView 的布局与 Mermaid 执行、Finder 扩展注册、窗口关闭动画和系统主题切换。发布前应在安装后的应用及 Finder 中打开 `docs/examples/mermaid.md`，检查图表、错误回退、主题切换，并快速切换多个预览文件。
+
+## 按需图表与 Quick Look 直接输出
+
+池测试覆盖最多两个存活运行时、跨任务复用、执行取消后销毁、空闲回收、所属窗口关闭时重建。原生 Tester 验证离屏图表不提交、滚动进入后提交；服务测试验证暂时拒绝不永久缓存成错误。Node 测试使用受控 DOM/观察器与 Mermaid 替身，验证初始视口、滚动、主题变化、过期结果、串行执行和失败回退；它不代表实际 WebKit 图表排版测试。
+
+Quick Look 的直接输出与原 parser → HTML → DOM → sanitizer 路径比较浏览器 DOM，覆盖嵌套列表、任务列表、表格对齐、代码转义、图片替代文字、链接、重复标题、数学和脚注；另测两条路径的选择、分阶段取消、写入中取消、精确字节预算和图表数量上限。包含原始 HTML 的文档继续使用现有危险元素/属性过滤测试。
+
+本次原生冒烟运行实际生成了图表位图；在当前构建的 .app 中检查了中文流程图、滚动后的时序图、无效语法源码回退与重新载入。没有安装或重新注册 Finder 扩展；Finder 的实际切换和 Quick Look WebKit 视觉表现仍需发布前验证。

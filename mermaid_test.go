@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"image"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -44,4 +45,27 @@ func TestMermaidPreviewStates(t *testing.T) {
 	if !tt.HasText("Mermaid") {
 		t.Fatal(tt.Texts())
 	}
+}
+
+func TestMermaidDefersOffscreenWork(t *testing.T) {
+	backend := &fakeDiagramBackend{}
+	source := "```mermaid\nflowchart LR; A-->B\n```\n\n" + strings.Repeat("Paragraph.\n\n", 100) + "```mermaid\nflowchart LR; X-->Y\n```"
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/visible.md", source: source}, md: &markdown.Options{}, diagrams: newDiagramService(backend, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})}
+	a.md.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock}
+	prepareTestReader(t, a)
+	tt := ui.NewTester(a.view, 600, 500)
+	for range 3 {
+		tt.Frame()
+	}
+	if len(backend.callbacks) != 1 {
+		t.Fatal("offscreen work admitted", len(backend.callbacks))
+	}
+	a.scroll.Y = a.scroll.MaxY
+	for range 3 {
+		tt.Frame()
+	}
+	if len(backend.callbacks) != 2 {
+		t.Fatal("visible work never admitted", len(backend.callbacks), a.scroll)
+	}
+	a.diagrams.close()
 }

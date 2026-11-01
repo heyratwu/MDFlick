@@ -4,7 +4,7 @@ import "errors"
 
 const diagramCacheBudget int64 = 64 << 20
 
-// A backend owns native rendering and its serial queue. A service owns the
+// A backend owns a document queue and borrows native runtimes. A service owns the
 // document lifetime, admission, deduplication and results. All service methods
 // and published mutations run on the UI thread; only backend callbacks may run
 // on workers. publish marshals those callbacks onto the UI thread.
@@ -41,7 +41,8 @@ func (s *diagramService) request(key diagramKey) (*diagramResult, bool) {
 	if !s.backend.submit(key, func(result diagramResult) {
 		s.publish(func() { s.commit(key, result) })
 	}) {
-		s.entries[key] = &diagramResult{err: errors.New("图表渲染队列已满，重新载入可重试")}
+		delete(s.entries, key)
+		return nil, false
 	}
 	return s.entries[key], true
 }

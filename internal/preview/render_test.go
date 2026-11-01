@@ -28,7 +28,7 @@ func TestPreviewAdapterResourceContract(t *testing.T) {
 }
 
 func TestRenderCancellationAtEachStage(t *testing.T) {
-	for _, stage := range []string{"preview.parse", "preview.markdown-html", "preview.dom", "preview.sanitize", "preview.output"} {
+	for _, stage := range []string{"preview.parse", "preview.inspect", "preview.direct", "preview.markdown-html", "preview.dom", "preview.sanitize", "preview.output"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -39,7 +39,11 @@ func TestRenderCancellationAtEachStage(t *testing.T) {
 					cancel()
 				}
 			})
-			result, err := Render(ctx, "# Heading\n\n| A |\n|---|\n| value |\n")
+			source := "# Heading\n\n| A |\n|---|\n| value |\n"
+			if stage == "preview.markdown-html" || stage == "preview.dom" || stage == "preview.sanitize" {
+				source += "\n<!-- raw HTML -->\n"
+			}
+			result, err := Render(ctx, source)
 			if !errors.Is(err, context.Canceled) || result != "" {
 				t.Fatal("cancelled work returned output", err)
 			}
@@ -205,7 +209,7 @@ func TestCancelDuringOutputReturnsNoDocument(t *testing.T) {
 	})
 	// Large enough for several serialization-buffer flushes. Cancellation happens
 	// after some bytes have been written into the private output builder.
-	source := strings.Repeat("Paragraph **bold** & < literal.\n\n", 2000)
+	source := "<!-- raw HTML -->\n\n" + strings.Repeat("Paragraph **bold** & < literal.\n\n", 2000)
 	result, err := render(ctx, source, limits{MaxHTMLSize, MaxDiagrams})
 	if err != context.Canceled || result != "" || lastStage != "preview.sanitize" {
 		t.Fatalf("output cancellation published a document or entered a later stage: %v, %s", err, lastStage)

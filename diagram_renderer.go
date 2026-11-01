@@ -26,26 +26,47 @@ type diagramResult struct {
 	bytes int64
 }
 
-// Each window owns one hidden WebView. All diagrams share its offline runtime,
-// and one worker serializes Mermaid's global configuration and DOM operations.
+// A document owns only its cancellation context and bounded submission queue.
+// Native runtimes are borrowed from the application pool when work executes.
 type diagramRenderer struct {
+	jobs   chan diagramJob
+	ctx    context.Context
+	cancel context.CancelFunc
+	pool   *diagramPool
+	create func() (diagramRuntime, error)
+}
+
+func newDiagramRenderer(win *mygo.Window, pool *diagramPool) *diagramRenderer {
+	ctx, cancel := context.WithCancel(context.Background())
+	// At most 128 keys are admitted by a document service. Queueing them here
+	// avoids making a full application queue a permanently cached render error.
+	r := &diagramRenderer{ctx: ctx, cancel: cancel, jobs: make(chan diagramJob, 128), pool: pool,
+		create: func() (diagramRuntime, error) { return newDiagramWebRuntime(win) }}
+	go r.work()
+	return r
+}
+
+func (r *diagramRenderer) close() { r.cancel() }
+
+// A runtime stays attached to its original native window. It may evaluate jobs
+// for other documents without moving its view; owner closure invalidates it.
+type diagramWebRuntime struct {
 	web    *mygo.WebView
 	ready  chan struct{}
 	once   sync.Once
-	jobs   chan diagramJob
-	slots  chan struct{}
 	ctx    context.Context
 	cancel context.CancelFunc
+	off    func()
 }
 
-func newDiagramRenderer(win *mygo.Window, slots chan struct{}) (*diagramRenderer, error) {
+func newDiagramWebRuntime(win *mygo.Window) (*diagramWebRuntime, error) {
 	web, err := win.NewWebView(mygo.WebViewOptions{URL: "about:blank", Page: mygo.PageOptions{Untrusted: true}})
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &diagramRenderer{slots: slots, web: web, ready: make(chan struct{}), ctx: ctx, cancel: cancel, jobs: make(chan diagramJob, 16)}
-	go r.work()
+	r := &diagramWebRuntime{web: web, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+	r.off = win.OnClosed(cancel)
 	web.Page().OnDidFinishLoad(func() {
 		go func() {
 			ctx, cancel := context.WithTimeout(r.ctx, 15*time.Second)
@@ -66,14 +87,17 @@ func newDiagramRenderer(win *mygo.Window, slots chan struct{}) (*diagramRenderer
 	return r, nil
 }
 
-func (r *diagramRenderer) close() { r.cancel(); r.web.Destroy() }
+func (r *diagramWebRuntime) close()      { r.cancel(); r.off(); r.web.Destroy() }
+func (r *diagramWebRuntime) alive() bool { return !r.web.IsDestroyed() }
 
-func (r *diagramRenderer) render(ctx context.Context, key diagramKey) diagramResult {
+func (r *diagramWebRuntime) render(ctx context.Context, key diagramKey) diagramResult {
 	if err := ctx.Err(); err != nil {
 		return diagramResult{err: err}
 	}
 	select {
 	case <-r.ready:
+	case <-r.ctx.Done():
+		return diagramResult{err: r.ctx.Err()}
 	case <-ctx.Done():
 		return diagramResult{err: ctx.Err()}
 	}
@@ -129,7 +153,9 @@ func (r *diagramRenderer) submit(key diagramKey, done func(diagramResult)) bool 
 		return false
 	}
 }
-func (r *diagramRenderer) work() { r.run(r.render) }
+func (r *diagramRenderer) work() {
+	r.run(func(ctx context.Context, key diagramKey) diagramResult { return r.pool.render(ctx, key, r.create) })
+}
 
 func (r *diagramRenderer) run(render func(context.Context, diagramKey) diagramResult) {
 	for {
@@ -146,14 +172,7 @@ func (r *diagramRenderer) run(render func(context.Context, diagramKey) diagramRe
 		case job := <-r.jobs:
 			result := diagramResult{err: job.ctx.Err()}
 			if result.err == nil {
-				if r.slots == nil {
-					result = render(job.ctx, job.key)
-				} else if err := acquireWork(job.ctx, r.slots); err != nil {
-					result.err = err
-				} else {
-					result = render(job.ctx, job.key)
-					<-r.slots
-				}
+				result = render(job.ctx, job.key)
 			}
 			job.cancel()
 			if r.ctx.Err() == nil {

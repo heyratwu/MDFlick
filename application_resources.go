@@ -14,6 +14,7 @@ type applicationResources struct {
 	loads, diagrams chan struct{}
 	images          *imageResources
 	diagramCache    *byteBudget
+	diagramPool     *diagramPool
 }
 
 func newApplicationResources() *applicationResources {

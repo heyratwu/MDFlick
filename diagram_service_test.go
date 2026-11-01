@@ -59,8 +59,12 @@ func TestDiagramServiceBudgetAndQueueFailure(t *testing.T) {
 	backend.rejected = true
 	failed := diagramKey{code: "rejected"}
 	result, ok := s.request(failed)
-	if !ok || result == nil || result.err == nil {
-		t.Fatal("queue failure not cached")
+	if ok || result != nil {
+		t.Fatal("full queue admitted work")
+	}
+	backend.rejected = false
+	if _, ok = s.request(failed); !ok || len(backend.callbacks) != 3 {
+		t.Fatal("temporary rejection permanently cached")
 	}
 	for i := len(s.entries); i < 128; i++ {
 		s.entries[diagramKey{code: string(rune(i + 1000))}] = nil

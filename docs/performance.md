@@ -127,6 +127,22 @@ Swift 使用 OSLog 的 `com.mdflick.app.QuickLook` / `Preview` 分类记录排�
 
 原生加载的 15 秒期限包含应用槽位排队、读取和预处理；应用最多执行两个加载任务。`ProcessingLimits` 由共享文档包提供，原文与转换后解析结果各最多 20,000 块，转换后 Markdown 最多 64 MiB；取消和超限不发布部分文档。图片资源生命周期使用会话 context，与加载操作的期限分离。
 
-图表仍每窗口一个 WebView/串行 worker，应用最多两个 worker 进入渲染调用，缓存估算预算每文档 64 MiB、全应用 128 MiB。槽位在 Go 调用返回时释放，超时的 JavaScript 仍可能继续执行；这不是 WebKit 执行或进程峰值内存的硬限制。
+当前图表通过应用共享池执行，最多两个按需 WebView，空闲 30 秒回收；任务取消或超时后销毁运行时。缓存估算预算仍为每文档 64 MiB、全应用 128 MiB。WebKit 实际进程回收由系统决定，缓存预算和 WebView 数量上限仍不代表进程峰值内存硬限制。
 
 `MDFLICK_TRACE=1` 还可记录 `native.parse`、`native.html`、`native.inlines`；其中 inlines 的 bytes 是处理的 Markdown 字节数。
+
+## 本次 Quick Look 直接输出对照
+
+2026-11-01，Apple M4、darwin/arm64；将修改前 HEAD 的完整 render 函数放入临时 benchmark，与当前实现使用相同工具链、相同性能语料，顺序运行 `-benchtime=20x -count=3`，取三次中位数。旧函数使用当前共享过滤器与内置脚本；临时 benchmark 已删除。以下只测 Go 输出链路，不含 Swift/C 复制、WebKit、图片解码或 Mermaid JavaScript 执行。
+
+| 场景 | 修改前 ms/op | 当前 ms/op | 修改前累计分配 MiB/op | 当前累计分配 MiB/op |
+| --- | ---: | ---: | ---: | ---: |
+| 约 1 MiB 多段落文本 | 24.819 | 9.467 | 43.38 | 22.27 |
+| 500 个表格 | 2.596 | 0.788 | 5.42 | 3.44 |
+| 1,000 组图片引用 | 2.031 | 0.507 | 3.27 | 1.40 |
+| 256 个 Mermaid 围栏 | 0.376 | 0.170 | 3.19 | 2.93 |
+| 500 个 HTML 对齐容器 | 1.509 | 1.548 | 3.22 | 3.22 |
+
+普通文本样本耗时约下降 62%、累计分配下降 49%。原始 HTML 语料保留 DOM 过滤，没有获得此优化收益；本次耗时约增加 3%，不解释为稳定退化幅度。分配为累计量，不是 RSS。
+
+新增阶段 `preview.inspect` 检查输出路径；普通 Markdown 使用 `preview.direct`，原始 HTML 仍记录 `preview.markdown-html`、`preview.dom` 和 `preview.sanitize`。两条路径均记录 `preview.output`。图表的 Swift content-ready 日志现仅代表初始视口批次，离屏图表不纳入该事件；不能将其视作全文图表渲染完毕。
