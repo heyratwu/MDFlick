@@ -27,6 +27,7 @@ type readerWindow struct {
 func (a *readerWindow) view(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Fill().Children(func() {
+		a.titleBar(c)
 		if a.loading {
 			ui.Text(c, "正在读取…").Padding(24)
 		} else if a.failure != "" {

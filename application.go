@@ -46,7 +46,14 @@ func (manager *application) newWindow(path string) *readerWindow {
 	if path != "" {
 		title = filepath.Base(path) + " — MDFlick"
 	}
-	a.win = mygo.NewWindow(mygo.WindowOptions{Title: title, Width: 900, Height: 720, MinWidth: 480, MinHeight: 360, Content: ui.View(a.view)})
+	a.win = mygo.NewWindow(mygo.WindowOptions{
+		Title: title, Width: 900, Height: 720, MinWidth: 480, MinHeight: 360,
+		TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: readerTitleBarHeight,
+		// Native macOS buttons are 14 points tall: equal 13-point margins
+		// center them in the 40-point title bar, including after a resize.
+		TrafficLightPosition: &mygo.Point{X: 12, Y: (readerTitleBarHeight - 14) / 2},
+		Content:              ui.View(a.view),
+	})
 	manager.windows[path] = a
 	a.win.OnClosed(func() {
 		a.documentSession.close()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -10,6 +11,25 @@ import (
 )
 
 const readerTextWidth float32 = 820
+
+const readerTitleBarHeight = 40
+
+func (a *readerWindow) titleBar(c *ui.Context) {
+	bar := c.TitleBar()
+	if bar.Height == 0 { // Native window controls hide in full screen.
+		return
+	}
+	title := "MDFlick"
+	if a.path != "" {
+		title = filepath.Base(a.path) + " — MDFlick"
+	}
+	// Equal insets keep the title centered while clearing native controls.
+	inset := max(bar.Left, bar.Right) + 12
+	ui.Row(c).Height(readerTitleBarHeight).Shrink(0).Padding(0, inset).
+		Background(ui.Hex("#F4F3F4")).Center().DragWindow().Children(func() {
+		ui.Text(c, title).FontSize(13).FontWeight(500).TextColor(ui.Hex("#4A4A4A")).MaxWidth(600)
+	})
+}
 
 // Keep prose centered, but reserve the space to its right for wide blocks.
 func readerWidths(c *ui.Context) (left, prose, wide float32) {
