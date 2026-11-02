@@ -1,6 +1,6 @@
 # MDFlick
 
-基于 MyGo 的 macOS Markdown 只读查看器，支持 macOS 12 及以上。
+基于 MyGo 的 Markdown 只读查看器，支持 macOS 12 及以上和 Windows。Quick Look 扩展仅适用于 macOS。
 
 - 双击 `.md`、`.markdown` 打开，多个文件分别显示在独立窗口。
 - 从应用图标启动时，首页中央显示「打开文件」按钮，选中的首个文件直接在当前窗口显示。
@@ -68,7 +68,36 @@ SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)' bash scripts/bui
 
 签名身份须已存在于钥匙串。脚本不自动公证；公开分发前，使用 `xcrun notarytool submit <dmg> --keychain-profile <profile> --wait` 提交，批准后用 `xcrun stapler staple <dmg>` 装订票据。
 
-## 安装与使用
+## 构建 Windows 安装包
+
+Windows PowerShell：
+
+```powershell
+.\scripts\build-windows.ps1           # x64
+.\scripts\build-windows.ps1 -Arch arm64
+```
+
+需要 go.mod 指定的 Go 工具链。Windows 上 MyGo 会在缺少 NSIS 时自动下载并校验安装器编译工具。也可在 macOS / Linux 交叉构建：先安装 NSIS（`brew install makensis` / `apt install nsis`），再执行：
+
+```sh
+bash scripts/build-windows.sh amd64
+bash scripts/build-windows.sh arm64
+```
+
+发布安装程序为 `build/windows-amd64/mdflick-setup-0.1.1-amd64.exe`（ARM64 对应 `windows-arm64` 和 `arm64.exe`，版本跟随 `mygo.json`）。脚本验证本次确实生成了安装程序，缺少 NSIS 时不会只产出主程序并报告成功。手动分发便携版本时，需要包含同目录的资源文件；直接运行便携版不负责系统注册。
+
+### Windows 安装与卸载
+
+1. 运行 `mdflick-setup-<版本>-<架构>.exe`，在安装向导中选择本地安装目录。默认为 `%LOCALAPPDATA%\Programs\MDFlick`，按当前用户安装，无需管理员权限；自定义路径需要当前用户可写，请选择专用程序目录。再次安装时默认沿用已有路径。
+2. 安装自动注册 `.md` 和 `.markdown` 两种文件类型，并在开始菜单创建 MDFlick 入口；完成页可启动程序、选择创建桌面快捷方式。
+3. 已有默认程序时，Windows 10/11 要求通过系统界面确认更改。打开开始菜单中的 **MDFlick - Default Apps**，在「默认应用」中找到 MDFlick，分别设置 `.md` 和 `.markdown`；也可右键文件 →「打开方式」→ MDFlick → 选择始终使用。安装器不会覆盖已有的系统默认选择；无现有处理程序时会写入文件类型默认关联。
+4. 在 Windows「设置 → 应用 → 已安装的应用」找到 MDFlick 并卸载，或使用开始菜单的 **MDFlick - Uninstall** / 安装目录中的 `Uninstall.exe`。卸载会移除程序、快捷方式和本应用的文件类型注册，保留用户文档。
+
+支持静默安装 `mdflick-setup-<版本>-<架构>.exe /S`，以及静默卸载 `Uninstall.exe /S`。自定义静默安装目录时把 `/D=C:\Apps\MDFlick` 放在命令末尾（NSIS 的 `/D=` 参数不加引号，即使路径含空格）。静默安装不会自动启动程序或创建桌面快捷方式。
+
+Windows 发布验收：在 Windows 10/11 上分别验证带空格/中文的安装路径、开始菜单启动、两种扩展名的双击打开（含已有默认程序的情况）、运行中覆盖安装、系统设置卸载及快捷方式/文件关联清理。macOS 的交叉构建不能代替这些实际系统检查。
+
+## macOS 安装与使用
 
 1. 打开 DMG，把 MDFlick 拖到「应用程序」，启动一次。
 2. 双击 Markdown 文件。如果此前已关联其他软件，在 Finder「显示简介 → 打开方式」选择 MDFlick，再点「全部更改」设为默认。应用注册为 Viewer，并尊重已有的默认应用选择。
