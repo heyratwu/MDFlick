@@ -186,3 +186,95 @@ func TestNativeImageSize(t *testing.T) {
 		}
 	}
 }
+
+func TestDeclaredImagePlaceholder(t *testing.T) {
+	for _, dimensions := range []string{`width="400" height="200"`, `width="80%" height="200"`} {
+		t.Run(dimensions, func(t *testing.T) {
+			release := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return
+				}
+				img := image.NewRGBA(image.Rect(0, 0, 120, 30))
+				for y := range 30 {
+					for x := range 120 {
+						img.SetRGBA(x, y, color.RGBA{R: 200, A: 255})
+					}
+				}
+				png.Encode(w, img)
+			}))
+			defer server.Close()
+			a := &readerWindow{documentSession: documentSession{path: "/tmp/placeholder.md", source: `<img src="` + server.URL + `/image" alt="Loading image" ` + dimensions + `>` + "\n\nAfter image."}}
+			a.resetMarkdown(context.Background(), a.path)
+			defer a.releaseImages()
+			prepareTestReader(t, a)
+			tt := ui.NewTester(a.view, 900, 700)
+			for _, dark := range []bool{false, true} {
+				tt.SetDark(dark)
+				bounds, ok := tt.Find("Loading image")
+				if !ok || abs(bounds.H-200) > .5 || bounds.W < 399 {
+					t.Fatalf("placeholder did not reserve declared size: %+v", bounds)
+				}
+				pixels := tt.Image()
+				edge := color.NRGBAModel.Convert(pixels.At(int(bounds.X+4), int(bounds.Y+bounds.H/2))).(color.NRGBA)
+				center := color.NRGBAModel.Convert(pixels.At(int(bounds.X+bounds.W/2), int(bounds.Y+bounds.H/2))).(color.NRGBA)
+				if edge.R != edge.G || edge.G != edge.B || center.R <= edge.R {
+					t.Fatalf("placeholder missing gray gradient: edge=%v center=%v", edge, center)
+				}
+				if path := os.Getenv("MDFLICK_PLACEHOLDER_SCREENSHOT"); path != "" && !dark {
+					file, err := os.Create(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					err = png.Encode(file, pixels)
+					file.Close()
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			tt.SetSize(450, 700)
+			before, _ := tt.Find("After image.")
+			placeholder, _ := tt.Find("Loading image")
+			if placeholder.W > 306.5 || placeholder.X+placeholder.W > 450 {
+				t.Fatalf("placeholder overflowed narrow viewport: %+v", placeholder)
+			}
+			close(release)
+			if _, err := a.images.load(server.URL + "/image"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
+			after, _ := tt.Find("After image.")
+			loaded, _ := tt.Find("Loading image")
+			if abs(after.Y-before.Y) > .5 || abs(loaded.W-placeholder.W) > .5 || abs(loaded.H-placeholder.H) > .5 {
+				t.Fatalf("loading changed declared layout: before=%+v after=%+v placeholder=%+v loaded=%+v", before, after, placeholder, loaded)
+			}
+			pixel := color.NRGBAModel.Convert(tt.Image().At(int(loaded.X+loaded.W/2), int(loaded.Y+loaded.H/2))).(color.NRGBA)
+			if pixel.R != 200 || pixel.G != 0 || pixel.B != 0 {
+				t.Fatalf("loaded image did not replace gradient: %v", pixel)
+			}
+		})
+	}
+}
+
+func TestUndeclaredImageKeepsAltPlaceholder(t *testing.T) {
+	for _, source := range []string{
+		`![Original alt](image.png)`,
+		`<img src="image.png" alt="Original alt">`,
+		`<img src="image.png" alt="Original alt" width="400">`,
+		`<img src="image.png" alt="Original alt" height="200">`,
+		`<img src="image.png" alt="Original alt" width="invalid" height="200">`,
+	} {
+		t.Run(source, func(t *testing.T) {
+			a := &readerWindow{documentSession: documentSession{path: "/tmp/alt.md", source: source}}
+			prepareTestReader(t, a)
+			a.md = &markdown.Options{ResolveImage: func(*ui.Context, string, ui.Element) ui.ImageSource { return nil }}
+			tt := ui.NewTester(a.view, 900, 700)
+			if !tt.HasText("Original alt") {
+				t.Fatal("missing dimensions changed the original alt-text placeholder", tt.Texts())
+			}
+		})
+	}
+}

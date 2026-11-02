@@ -135,6 +135,10 @@ func (a *readerWindow) nativeHTMLImage(c *ui.Context, im readerNativeImage) {
 	box.Children(func() {
 		draw := func() {
 			if src == nil || im.image.Pending {
+				if (metadata.Width > 0 || metadata.WidthPercent > 0) && metadata.Height > 0 {
+					nativeImagePlaceholder(c, width, height, im.alt)
+					return
+				}
 				label := im.alt
 				if label == "" {
 					label = "图片"
@@ -169,6 +173,17 @@ func (a *readerWindow) nativeHTMLImage(c *ui.Context, im readerNativeImage) {
 			draw()
 		}
 	})
+}
+
+func nativeImagePlaceholder(c *ui.Context, width, height float32, alt string) {
+	base, highlight := ui.Hex("#E5E5E5"), ui.Hex("#F2F2F2")
+	if c.Theme().Dark {
+		base, highlight = ui.Hex("#303030"), ui.Hex("#404040")
+	}
+	ui.Box(c).Size(width, height).Shrink(0).Role(ui.RoleImage).Label(alt).
+		LinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
+			{Color: base, At: 0}, {Color: highlight, At: .5}, {Color: base, At: 1},
+		}})
 }
 
 func nativeImageSize(im document.HTMLImage, naturalW, naturalH, available float32) (float32, float32) {
