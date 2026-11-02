@@ -29,6 +29,7 @@ type readerWindow struct {
 	open           func()
 	performance    readerPerformance
 	openStarted    time.Time
+	watchCancel    context.CancelFunc
 }
 
 func (a *readerWindow) view(c *ui.Context) {
@@ -107,9 +108,24 @@ func (a *readerWindow) load() {
 		a.performance = readerPerformance{ctx: ctx, started: started}
 	}
 	path, win := a.path, a.win
+	// Establish the watch before the first read so a save during opening is
+	// not missed. Its lifetime belongs to the window, not to any single load.
+	var watchCtx context.Context
+	if a.watchCancel == nil && path != "" {
+		watchCtx, a.watchCancel = context.WithCancel(context.Background())
+	}
 	a.closeDiagrams()
 	a.releaseImages()
 	go func() {
+		if watchCtx != nil {
+			watchReaderFile(watchCtx, path, func() {
+				win.Update(func() {
+					if !a.closed && a.path == path {
+						a.load()
+					}
+				})
+			})
+		}
 		source, prepared, err := loadReaderDocument(ctx, path, resources)
 		if ctx.Err() != nil {
 			return
@@ -146,6 +162,10 @@ func (a *readerWindow) closeDiagrams() {
 }
 
 func (a *readerWindow) close() {
+	if a.watchCancel != nil {
+		a.watchCancel()
+		a.watchCancel = nil
+	}
 	a.documentSession.close()
 	a.releaseImages()
 	a.closeDiagrams()
