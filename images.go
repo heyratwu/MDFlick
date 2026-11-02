@@ -110,11 +110,15 @@ func decodeImage(ctx context.Context, data []byte, isSVG bool, reserve func(int6
 		return nil, err
 	}
 	if isSVG {
-		// SVG structures vary: charge a conservative source-based estimate.
-		if err := reserve(int64(len(data))*8 + 4096); err != nil {
+		normalized, err := nativeSVGVariables(ctx, data)
+		if err != nil {
 			return nil, err
 		}
-		return ui.ParseSVG(data)
+		// SVG structures vary: charge a conservative source-based estimate.
+		if err := reserve(int64(max(len(data), len(normalized)))*8 + 4096); err != nil {
+			return nil, err
+		}
+		return ui.ParseSVG(normalized)
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {

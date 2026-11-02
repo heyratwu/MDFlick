@@ -16,6 +16,7 @@ type preparedReaderDocument struct {
 	markdown   string
 	parsed     *parser.Document
 	ranges     []document.HTMLAlignment
+	images     map[int]document.HTMLImage
 	hasMermaid bool
 }
 
@@ -49,7 +50,8 @@ func prepareReaderDocumentWithLimits(parent context.Context, source string, limi
 		return preparedReaderDocument{}, err
 	}
 	started = time.Now()
-	result.markdown, result.ranges, err = document.NativeHTMLContext(ctx, parsed, limit)
+	converted, err := document.NativeHTMLDocumentContext(ctx, parsed, limit)
+	result.markdown, result.ranges, result.images = converted.Markdown, converted.Ranges, converted.Images
 	if err != nil {
 		return preparedReaderDocument{}, err
 	}

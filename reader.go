@@ -64,6 +64,7 @@ func (a *readerWindow) view(c *ui.Context) {
 			a.md.CodeBlock = a.codeBlock
 			a.md.HighlightLimit = readerHighlightLimit
 			a.md.BlockStyle = a.readerBlockStyle
+			a.md.Block = a.nativeHTMLBlock
 			a.md.OnLink = a.linkHandler(c)
 			finishDiagrams := a.beginDiagramFrame(c)
 			defer finishDiagrams()
