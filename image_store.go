@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"mdflick/internal/diagnostics"
+	"net"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -20,10 +21,10 @@ const (
 	documentImageLimit           = 128
 )
 
-var errImageBudget = errors.New("图片缓存已达上限，重新载入可重试")
+var errImageBudget = errors.New("图片缓存已达上限，稍后可重试")
 
 // Account for active document caches. This is an estimate, not a limit on total
-// process/GPU memory. Completed images keep their geometry until reload.
+// process/GPU memory. Views retain geometry independently when offscreen bitmaps are reclaimed.
 type imageResources struct {
 	mu          sync.Mutex
 	used, limit int64
@@ -34,6 +35,8 @@ type imageEntry struct {
 	done  chan struct{}
 	image ui.ImageSource
 	err   error
+	bytes int64
+	retry time.Time
 }
 
 type imageStore struct {
@@ -47,6 +50,7 @@ type imageStore struct {
 	used, limit int64
 	maxEntries  int
 	closed      bool
+	wanted      map[string]float32
 }
 
 func newImageStore(parent context.Context, path string, resources *imageResources) *imageStore {
@@ -71,6 +75,7 @@ func (s *imageStore) close() {
 	s.resources.mu.Unlock()
 	s.used = 0
 	clear(s.entries)
+	s.wanted = nil
 }
 
 // Normalize local paths and URL fragments before deduplicating. Query strings
@@ -128,6 +133,9 @@ func (s *imageStore) loadContext(ctx context.Context, source string) (ui.ImageSo
 		s.mu.Unlock()
 		return nil, context.Canceled
 	}
+	if entry := s.entries[key]; entry != nil && !entry.retry.IsZero() && !time.Now().Before(entry.retry) {
+		delete(s.entries, key)
+	}
 	if entry := s.entries[key]; entry != nil {
 		s.mu.Unlock()
 		select {
@@ -140,6 +148,7 @@ func (s *imageStore) loadContext(ctx context.Context, source string) (ui.ImageSo
 			return nil, ctx.Err()
 		}
 	}
+	s.evictLocked(0, false, true)
 	if len(s.entries) >= s.maxEntries {
 		s.mu.Unlock()
 		return nil, errImageBudget
@@ -154,6 +163,10 @@ func (s *imageStore) loadContext(ctx context.Context, source string) (ui.ImageSo
 		image, err = nil, context.Canceled
 	}
 	entry.image, entry.err = image, err
+	var network net.Error
+	if errors.Is(err, errImageBudget) || errors.Is(err, errImageTemporary) || errors.As(err, &network) {
+		entry.retry = time.Now().Add(2 * time.Second)
+	}
 	// A scroll cancellation is retryable when the image returns to the viewport.
 	// Delete only our own entry, before waking any duplicate waiter.
 	if errors.Is(err, context.Canceled) && s.entries[key] == entry {
@@ -188,6 +201,7 @@ func (s *imageStore) loadOnce(ctx context.Context, key string) (ui.ImageSource, 
 		if s.closed || ctx.Err() != nil {
 			return context.Canceled
 		}
+		s.evictLocked(bytes, false, false)
 		s.resources.mu.Lock()
 		defer s.resources.mu.Unlock()
 		if bytes > s.limit-s.used || bytes > s.resources.limit-s.resources.used {
@@ -196,6 +210,9 @@ func (s *imageStore) loadOnce(ctx context.Context, key string) (ui.ImageSource, 
 		s.used += bytes
 		s.resources.used += bytes
 		reserved += bytes
+		if entry := s.entries[key]; entry != nil {
+			entry.bytes += bytes
+		}
 		return nil
 	}
 	image, err := loadDocumentImage(ctx, s.dir, key, reserve)
@@ -204,6 +221,9 @@ func (s *imageStore) loadOnce(ctx context.Context, key string) (ui.ImageSource, 
 	}
 	if err != nil {
 		s.mu.Lock()
+		if entry := s.entries[key]; entry != nil {
+			entry.bytes = 0
+		}
 		if !s.closed {
 			s.resources.mu.Lock()
 			s.resources.used -= reserved
@@ -226,6 +246,9 @@ func (s *imageStore) peek(key string) (ui.ImageSource, bool) {
 	}
 	select {
 	case <-entry.done:
+		if !entry.retry.IsZero() && !time.Now().Before(entry.retry) {
+			return nil, false
+		}
 		return entry.image, true
 	default:
 		return nil, false
@@ -235,5 +258,48 @@ func (s *imageStore) peek(key string) (ui.ImageSource, bool) {
 func (s *imageStore) canAdmit(key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.evictLocked(0, false, true)
 	return !s.closed && (s.entries[key] != nil || len(s.entries) < s.maxEntries)
+}
+
+const imageWarmBudget int64 = 16 << 20
+
+// Called with the store lock; resource accounting always follows that lock.
+// Active and visible entries are pinned. No cross-store lock is acquired.
+func (s *imageStore) evictLocked(incoming int64, warm, admission bool) {
+	if s.wanted == nil {
+		return
+	} // direct loader callers have no viewport contract
+	s.resources.mu.Lock()
+	defer s.resources.mu.Unlock()
+	for key, entry := range s.entries {
+		if _, keep := s.wanted[key]; keep {
+			continue
+		}
+		select {
+		case <-entry.done:
+		default:
+			continue
+		}
+		if warm && s.used <= imageWarmBudget && len(s.entries) < 64 {
+			break
+		}
+		if !warm && admission && len(s.entries) < s.maxEntries {
+			break
+		}
+		if !warm && !admission && incoming <= s.limit-s.used && incoming <= s.resources.limit-s.resources.used {
+			break
+		}
+		s.used -= entry.bytes
+		s.resources.used -= entry.bytes
+		delete(s.entries, key)
+	}
+}
+func (s *imageStore) updateViewport(wanted map[string]float32) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before := s.used
+	s.wanted = wanted
+	s.evictLocked(0, true, false)
+	return s.used != before
 }

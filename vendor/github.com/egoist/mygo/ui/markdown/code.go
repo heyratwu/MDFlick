@@ -29,14 +29,17 @@ func (b *CodeBlockView) Code() string { return b.st.doc.Lines(b.Index) }
 // codeState is what a view keeps of a code block: the tokens of its lines
 // and the spans of its chunks of lines, to highlight only what changed.
 type codeState struct {
-	lang     string
-	tok      editor.Tokenizer
-	lines    []string
-	ends     []uint64
-	toks     [][]editor.Token
-	chunks   []codeChunk
-	copiedAt time.Time
-	seen     bool
+	lang           string
+	tok            editor.Tokenizer
+	lines          []string
+	ends           []uint64
+	toks           [][]editor.Token
+	chunks         []codeChunk
+	copiedAt       time.Time
+	seen           bool
+	revision       uint32
+	highlightLimit int
+	plain          bool
 }
 
 // codeChunk is chunkLines lines of a code block, laid out as one text, so
@@ -179,6 +182,22 @@ func (b *CodeBlockView) Body(c *ui.Context) ui.Element {
 // the spans of the chunks they are in anew.
 func (st *viewState) highlight(cs *codeState, i int) {
 	d := st.doc
+	revision := d.Block(i).Revision()
+	if cs.revision == revision && cs.highlightLimit == st.o.HighlightLimit && len(cs.chunks) > 0 {
+		return
+	}
+	plain := st.o.HighlightLimit > 0 && d.Block(i).End-d.Block(i).Start > st.o.HighlightLimit
+	if cs.highlightLimit != st.o.HighlightLimit || cs.plain != plain {
+		cs.lines = nil
+		cs.ends = nil
+		cs.toks = nil
+		cs.chunks = nil
+	}
+	cs.revision, cs.highlightLimit, cs.plain = revision, st.o.HighlightLimit, plain
+	tokenizer := cs.tok
+	if plain {
+		tokenizer = nil
+	}
 	n := d.LineCount(i)
 	// The first line that differs from those tokenized.
 	k0 := 0
@@ -200,8 +219,8 @@ func (st *viewState) highlight(cs *codeState, i int) {
 	for k := k0; k < n; k++ {
 		line, _ := d.Line(i, k)
 		var toks []editor.Token
-		if cs.tok != nil {
-			toks, state = cs.tok.Tokenize(line, state, nil)
+		if tokenizer != nil {
+			toks, state = tokenizer.Tokenize(line, state, nil)
 		}
 		cs.lines = append(cs.lines, line)
 		cs.ends = append(cs.ends, state)

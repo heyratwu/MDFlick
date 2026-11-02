@@ -72,7 +72,16 @@
  
  	// CodeBlock, when set, builds code blocks in place of DefaultCodeBlock,
  	// which it can call to wrap it; Code builds the code blocks of the
-@@ -58,6 +62,9 @@
+@@ -40,6 +44,8 @@
+ 	// WrapCode wraps the lines of code blocks rather than scrolling them
+ 	// sideways.
+ 	WrapCode bool
++	// HighlightLimit renders larger code blocks as plain selectable text. Zero is unlimited.
++	HighlightLimit int
+ 	// Math, when set, builds blocks of display math from their TeX, which
+ 	// show as their TeX without it; math within text shows as its TeX.
+ 	Math func(c *ui.Context, tex string)
+@@ -58,6 +64,9 @@
  	// Block, when set, is asked first for each block, and builds it in
  	// its place when it returns true.
  	Block func(c *ui.Context, d *parser.Document, i int) bool
@@ -82,7 +91,7 @@
  
  	// Reveal is how Stream shows text as it comes: DefaultReveal when nil.
  	Reveal *Reveal
-@@ -88,7 +95,18 @@
+@@ -88,7 +97,18 @@
  //
  //	markdown.View(c, app.readme, &app.md)
  func View(c *ui.Context, src string, o *Options) ui.Element {
@@ -102,7 +111,7 @@
  }
  
  // Stream shows src, Markdown still being written, as a language model's
-@@ -105,7 +123,7 @@
+@@ -105,7 +125,7 @@
  //		markdown.Stream(c, msg.text, &app.md)
  //	}
  func Stream(c *ui.Context, src string, o *Options) ui.Element {
@@ -111,7 +120,7 @@
  }
  
  // stateKey keys a view's state among its root's.
-@@ -150,7 +168,7 @@
+@@ -150,7 +170,7 @@
  
  func newState() *viewState { return &viewState{scrollTo: -1} }
  
@@ -120,7 +129,7 @@
  	if o == nil {
  		o = &defaultOptions
  	}
-@@ -158,8 +176,16 @@
+@@ -158,8 +178,16 @@
  	st := *ui.Local(root, stateKey{}, newState)
  	st.o = o
  	ext := o.Extensions
@@ -137,7 +146,7 @@
  	}
  	if st.doc == nil || st.ext != ext {
  		st.doc, st.ext = parser.New(ext), ext
-@@ -286,10 +312,15 @@
+@@ -286,10 +314,15 @@
  	o := st.o
  	th := &st.th
  	b := d.Block(i)
@@ -225,3 +234,65 @@
 +		img.Tooltip(n.Title)
 +	}
 +}
+--- a/vendor/github.com/egoist/mygo/ui/markdown/code.go
++++ b/vendor/github.com/egoist/mygo/ui/markdown/code.go
+@@ -29,14 +29,17 @@
+ // codeState is what a view keeps of a code block: the tokens of its lines
+ // and the spans of its chunks of lines, to highlight only what changed.
+ type codeState struct {
+-	lang     string
+-	tok      editor.Tokenizer
+-	lines    []string
+-	ends     []uint64
+-	toks     [][]editor.Token
+-	chunks   []codeChunk
+-	copiedAt time.Time
+-	seen     bool
++	lang           string
++	tok            editor.Tokenizer
++	lines          []string
++	ends           []uint64
++	toks           [][]editor.Token
++	chunks         []codeChunk
++	copiedAt       time.Time
++	seen           bool
++	revision       uint32
++	highlightLimit int
++	plain          bool
+ }
+ 
+ // codeChunk is chunkLines lines of a code block, laid out as one text, so
+@@ -179,6 +182,22 @@
+ // the spans of the chunks they are in anew.
+ func (st *viewState) highlight(cs *codeState, i int) {
+ 	d := st.doc
++	revision := d.Block(i).Revision()
++	if cs.revision == revision && cs.highlightLimit == st.o.HighlightLimit && len(cs.chunks) > 0 {
++		return
++	}
++	plain := st.o.HighlightLimit > 0 && d.Block(i).End-d.Block(i).Start > st.o.HighlightLimit
++	if cs.highlightLimit != st.o.HighlightLimit || cs.plain != plain {
++		cs.lines = nil
++		cs.ends = nil
++		cs.toks = nil
++		cs.chunks = nil
++	}
++	cs.revision, cs.highlightLimit, cs.plain = revision, st.o.HighlightLimit, plain
++	tokenizer := cs.tok
++	if plain {
++		tokenizer = nil
++	}
+ 	n := d.LineCount(i)
+ 	// The first line that differs from those tokenized.
+ 	k0 := 0
+@@ -200,8 +219,8 @@
+ 	for k := k0; k < n; k++ {
+ 		line, _ := d.Line(i, k)
+ 		var toks []editor.Token
+-		if cs.tok != nil {
+-			toks, state = cs.tok.Tokenize(line, state, nil)
++		if tokenizer != nil {
++			toks, state = tokenizer.Tokenize(line, state, nil)
+ 		}
+ 		cs.lines = append(cs.lines, line)
+ 		cs.ends = append(cs.ends, state)

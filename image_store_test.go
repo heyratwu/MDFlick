@@ -117,8 +117,8 @@ func TestImageStoreBudgetsAndRelease(t *testing.T) {
 	if resources.used != charge {
 		t.Fatal("release was not idempotent", resources.used)
 	}
-	// Failed admissions are cached until reload; a different resource can use
-	// the budget released by the closed document.
+	// A different resource can immediately use the budget released by the
+	// closed document; the failed address retains its retry cooldown.
 	if _, err := third.load("two.png"); err != nil {
 		t.Fatal("released budget unusable", err)
 	}
@@ -231,5 +231,72 @@ func TestReaderImagesShareStoreAndRefreshNestedBlocks(t *testing.T) {
 	}
 	if _, err := firstStore.load(server.URL + "/image"); !errors.Is(err, context.Canceled) {
 		t.Fatal("old document loader remained active", err)
+	}
+}
+
+func TestImageViewportReclaimsAndReloads(t *testing.T) {
+	dir := t.TempDir()
+	var data bytes.Buffer
+	png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 2, 2)))
+	for _, name := range []string{"one.png", "two.png"} {
+		if err := os.WriteFile(filepath.Join(dir, name), data.Bytes(), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	charge := int64(data.Len()) + 16
+	resources := imageTestResources(charge, 2)
+	s := newImageStore(context.Background(), filepath.Join(dir, "doc.md"), resources)
+	defer s.close()
+	s.limit = charge
+	one, _ := s.key("one.png")
+	two, _ := s.key("two.png")
+	s.updateViewport(map[string]float32{one: 0})
+	if _, err := s.load(one); err != nil {
+		t.Fatal(err)
+	}
+	s.updateViewport(map[string]float32{two: 0})
+	if _, err := s.load(two); err != nil {
+		t.Fatal("offscreen bitmap prevented visible image", err)
+	}
+	if _, ok := s.peek(one); ok {
+		t.Fatal("old bitmap retained")
+	}
+	s.updateViewport(map[string]float32{one: 0})
+	if _, err := s.load(one); err != nil {
+		t.Fatal("evicted image failed to return", err)
+	}
+	if s.used != charge || resources.used != charge {
+		t.Fatal("eviction accounting drift", s.used, resources.used)
+	}
+	s.close()
+	if resources.used != 0 {
+		t.Fatal("close leaked reclaimed budget")
+	}
+}
+
+func TestTemporaryImageFailureCanRetryAfterCooldown(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w.WriteHeader(503)
+			return
+		}
+		png.Encode(w, image.NewRGBA(image.Rect(0, 0, 2, 2)))
+	}))
+	defer server.Close()
+	s := newImageStore(context.Background(), "/tmp/doc.md", imageTestResources(1024, 2))
+	defer s.close()
+	if _, err := s.load(server.URL); !errors.Is(err, errImageTemporary) {
+		t.Fatal(err)
+	}
+	s.load(server.URL)
+	if requests.Load() != 1 {
+		t.Fatal("failure retried on every frame")
+	}
+	s.mu.Lock()
+	s.entries[server.URL].retry = time.Now().Add(-time.Second)
+	s.mu.Unlock()
+	if _, err := s.load(server.URL); err != nil || requests.Load() != 2 {
+		t.Fatal("temporary failure became permanent", err)
 	}
 }

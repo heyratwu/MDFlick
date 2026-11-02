@@ -20,6 +20,10 @@ type readerImageFrame struct {
 	wanted    map[string]float32
 }
 type imageAnchorKey struct{}
+type imageGeometry struct {
+	handle        ui.Handle
+	width, height float32
+}
 
 func (a *readerWindow) beginImageFrame(c *ui.Context) func() {
 	if a.imageScheduler == nil {
@@ -42,8 +46,20 @@ func (f *readerImageFrame) resolve(c *ui.Context, source string, box ui.Element)
 	if err != nil {
 		return nil
 	}
-	anchor := *ui.Local(box, imageAnchorKey{}, func() *ui.Handle { return &ui.Handle{} })
+	geometry := *ui.Local(box, imageAnchorKey{}, func() *imageGeometry { return &imageGeometry{} })
+	anchor := &geometry.handle
 	box.Bind(anchor)
+	image, _ := s.peek(key)
+	switch src := image.(type) {
+	case *ui.Bitmap:
+		w, h := src.Size()
+		geometry.width, geometry.height = float32(w), float32(h)
+	case *ui.SVG:
+		geometry.width, geometry.height = src.Size()
+	}
+	if image == nil && geometry.width > 0 && geometry.height > 0 {
+		box.Width(geometry.width).AspectRatio(geometry.width / geometry.height)
+	}
 	width, height := c.Size()
 	c.AfterPresent(func() {
 		bounds := anchor.Bounds(c)
@@ -52,7 +68,6 @@ func (f *readerImageFrame) resolve(c *ui.Context, source string, box ui.Element)
 			f.add(key, distance)
 		}
 	})
-	image, _ := s.peek(key)
 	return image
 }
 
@@ -126,6 +141,9 @@ func (s *imageScheduler) update(wanted map[string]float32, invalidate func()) {
 	defer s.mu.Unlock()
 	if s.store.ctx.Err() != nil {
 		return
+	}
+	if s.store.updateViewport(wanted) && invalidate != nil {
+		invalidate()
 	}
 	s.invalidate, s.wanted = invalidate, wanted
 	s.awaitLayout = false

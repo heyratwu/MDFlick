@@ -21,6 +21,7 @@ func (s *documentSession) beginLoad() (context.Context, uint64) {
 	// The loading/error screens never display the previous parse. Release our
 	// ownership before a new worker builds another potentially large document.
 	s.prepared = preparedReaderDocument{}
+	s.source = ""
 	s.generation++
 	s.loading, s.failure = true, ""
 	return ctx, s.generation
@@ -29,6 +30,7 @@ func (s *documentSession) accepts(version uint64) bool { return !s.closed && s.g
 func (s *documentSession) close() {
 	s.closed = true
 	s.prepared = preparedReaderDocument{}
+	s.source = ""
 	if s.cancel != nil {
 		s.cancel()
 	}

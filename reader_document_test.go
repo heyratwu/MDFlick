@@ -51,7 +51,7 @@ func TestPreparedPublication(t *testing.T) {
 		t.Fatal("current snapshot lost")
 	}
 	a.close()
-	if a.completePrepared(current, "", preparedReaderDocument{}, nil) || a.source != source {
+	if a.completePrepared(current, "", preparedReaderDocument{}, nil) || a.source != "" {
 		t.Fatal("closed window accepted snapshot")
 	}
 	ctx, cancel := context.WithCancel(context.Background())

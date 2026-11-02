@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -59,6 +60,8 @@ func loadDocumentImage(ctx context.Context, dir, source string, reserve func(int
 	return decodeImage(ctx, data, strings.EqualFold(filepath.Ext(path), ".svg"), reserve)
 }
 
+var errImageTemporary = errors.New("图片请求暂时失败")
+
 const imageRequestTimeout = 15 * time.Second
 
 var imageHTTPClient = &http.Client{
@@ -84,6 +87,9 @@ func remoteImage(ctx context.Context, address string, reserve func(int64) error)
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+		return nil, fmt.Errorf("%w：HTTP %d", errImageTemporary, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("图片请求失败：HTTP %d", resp.StatusCode)
 	}

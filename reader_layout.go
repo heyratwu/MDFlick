@@ -11,6 +11,7 @@ import (
 )
 
 const readerTextWidth float32 = 820
+const readerHighlightLimit = 32 << 10
 
 const readerTitleBarHeight = 40
 
@@ -46,9 +47,17 @@ func (a *readerWindow) codeBlock(c *ui.Context, b *markdown.CodeBlockView) {
 	wide = max(prose, wide-a.blockIndent)
 	box := markdown.DefaultCodeBlock(c, b)
 	size := *ui.Local(box, readerCodeKey{}, func() *readerCodeSize { return &readerCodeSize{} })
-	if source := b.Code(); size.source != source {
+	if source := b.Code(); len(source) > readerHighlightLimit {
+		// Avoid a synchronous MeasureText for every line (or one enormous line).
+		box.Width(wide)
+		return
+	} else if size.source != source {
 		size.source, size.width = source, 0
 		for line := range strings.SplitSeq(source, "\n") {
+			if len(line) > 4096 {
+				size.width = 1e9
+				break
+			}
 			w, _ := c.MeasureText(0, ui.Span{Text: line, Font: typography.CodeFont, Size: 14, Weight: 400})
 			size.width = max(size.width, w+30) // Code padding and border.
 		}

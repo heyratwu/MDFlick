@@ -73,3 +73,41 @@ func TestDiagramServiceBudgetAndQueueFailure(t *testing.T) {
 		t.Fatal("entry limit ignored")
 	}
 }
+
+func TestDiagramViewportRejectsCancelledPublication(t *testing.T) {
+	backend := &fakeDiagramBackend{}
+	s := newDiagramService(backend, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})
+	defer s.close()
+	key := diagramKey{code: "returning"}
+	s.update(map[diagramKey]float32{key: 0})
+	old := backend.callbacks[0]
+	s.update(map[diagramKey]float32{})
+	s.update(map[diagramKey]float32{key: 0})
+	old(diagramResult{bytes: 100})
+	if s.entries[key] != nil || s.bytes != 0 {
+		t.Fatal("cancelled generation restored result")
+	}
+	backend.callbacks[1](diagramResult{bytes: 20})
+	if s.entries[key] == nil || s.bytes != 20 {
+		t.Fatal("new generation lost")
+	}
+}
+
+func TestDiagramViewportReclaimsForVisibleResult(t *testing.T) {
+	backend := &fakeDiagramBackend{}
+	budget := &byteBudget{limit: diagramCacheBudget}
+	s := newDiagramService(backend, func(fn func()) { fn() }, budget)
+	defer s.close()
+	one, two := diagramKey{code: "one"}, diagramKey{code: "two"}
+	s.update(map[diagramKey]float32{one: 0})
+	backend.callbacks[0](diagramResult{bytes: diagramCacheBudget})
+	s.update(map[diagramKey]float32{two: 0})
+	backend.callbacks[1](diagramResult{bytes: 1024})
+	if s.entries[one] != nil || s.entries[two].err != nil || s.bytes != 1024 || budget.used != 1024 {
+		t.Fatal("offscreen result pinned budget", s.bytes, budget.used)
+	}
+	s.update(map[diagramKey]float32{one: 0})
+	if len(backend.callbacks) != 3 {
+		t.Fatal("evicted result could not return")
+	}
+}

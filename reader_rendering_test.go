@@ -186,3 +186,70 @@ func benchmarkView(a *readerWindow, prepared bool) func(*ui.Context) {
 		})
 	}
 }
+
+func TestLongDocumentCopiesBeyondViewport(t *testing.T) {
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/long-copy.md", source: "# Start\n\n" + strings.Repeat("Paragraph with a [link](https://example.com).\n\n", 1200) + "## Far end\n\nLast content."}}
+	prepareTestReader(t, a)
+	tt := ui.NewTester(a.view, 900, 720)
+	r, _ := tt.Find("Start")
+	tt.ClickAt(r.X+5, r.Y+r.H/2)
+	tt.Command("selectAll")
+	tt.Command("copy")
+	got := tt.Clipboard()
+	if strings.Count(got, "Paragraph with a link.") != 1200 || !strings.Contains(got, "Last content.") {
+		t.Fatal("copy omitted offscreen blocks")
+	}
+	tt.Key(ui.Cmd|ui.Shift, ui.KeyC)
+	if !strings.Contains(tt.Clipboard(), "## Far end") {
+		t.Fatal("Markdown copy lost offscreen heading")
+	}
+}
+
+func TestLargeCodeRemainsSelectableAcrossThemeAndReplacement(t *testing.T) {
+	source := "```go\n" + strings.Repeat("var value = 42 // example\n", 1800) + "last_line\n```\n"
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/code.md", source: source}}
+	prepareTestReader(t, a)
+	tt := ui.NewTester(a.view, 900, 720)
+	r, _ := tt.Find("Code, go")
+	tt.ClickAt(r.X+15, r.Y+60)
+	tt.Command("selectAll")
+	tt.Command("copy")
+	if !strings.Contains(tt.Clipboard(), "last_line") || strings.Count(tt.Clipboard(), "var value = 42") != 1800 {
+		t.Fatal("large plain code lost content")
+	}
+	tt.SetDark(true)
+	tt.Frame()
+	a.source = "```go\nsmall_replacement\n```\n"
+	prepareTestReader(t, a)
+	tt.Frame()
+	if !tt.HasText("small_replacement") || tt.HasText("last_line") {
+		t.Fatal("code cache retained prior document")
+	}
+}
+
+func BenchmarkLargeCodeFirstFrame(b *testing.B) {
+	source := "```go\n" + strings.Repeat("var value = 42 // example\n", 1800) + "last_line\n```\n"
+	for _, limit := range []int{0, readerHighlightLimit} {
+		name := "highlighted"
+		if limit > 0 {
+			name = "bounded"
+		}
+		b.Run(name, func(b *testing.B) {
+			for b.Loop() {
+				b.StopTimer()
+				prepared, err := prepareReaderDocument(context.Background(), source)
+				if err != nil {
+					b.Fatal(err)
+				}
+				options := &markdown.Options{HighlightLimit: limit}
+				b.StartTimer()
+				tt := ui.NewTester(func(c *ui.Context) { markdown.ViewDocument(c, prepared.parsed, options) }, 900, 720)
+				b.StopTimer()
+				if !tt.HasText("last_line") {
+					b.Fatal("missing code")
+				}
+				b.StartTimer()
+			}
+		})
+	}
+}

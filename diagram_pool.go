@@ -16,6 +16,7 @@ type diagramRuntime interface {
 }
 
 type pooledDiagramJob struct {
+	start  func() bool
 	ctx    context.Context
 	key    diagramKey
 	create func() (diagramRuntime, error)
@@ -42,6 +43,10 @@ func newDiagramPool(slots chan struct{}) *diagramPool {
 func (p *diagramPool) close() { p.cancel() }
 
 func (p *diagramPool) render(ctx context.Context, key diagramKey, create func() (diagramRuntime, error)) diagramResult {
+	return p.renderWithStart(ctx, key, create, nil)
+}
+
+func (p *diagramPool) renderWithStart(ctx context.Context, key diagramKey, create func() (diagramRuntime, error), start func() bool) diagramResult {
 	if err := ctx.Err(); err != nil {
 		return diagramResult{err: err}
 	}
@@ -53,7 +58,7 @@ func (p *diagramPool) render(ctx context.Context, key diagramKey, create func() 
 			go p.work()
 		}
 	})
-	job := pooledDiagramJob{ctx: ctx, key: key, create: create, result: make(chan diagramResult, 1)}
+	job := pooledDiagramJob{ctx: ctx, key: key, create: create, result: make(chan diagramResult, 1), start: start}
 	select {
 	case p.jobs <- job:
 	case <-ctx.Done():
@@ -99,11 +104,16 @@ func (p *diagramPool) work() {
 			ctx, cancel := context.WithCancel(job.ctx)
 			stop := context.AfterFunc(p.ctx, cancel)
 			result := diagramResult{err: ctx.Err()}
+			usedRuntime := false
 			if p.ctx.Err() != nil {
 				cancel()
 				result.err = p.ctx.Err()
 			}
+			if result.err == nil && job.start != nil && !job.start() {
+				result.err = context.Canceled
+			}
 			if result.err == nil {
+				usedRuntime = true
 				if runtime != nil && !runtime.alive() {
 					release()
 				}
@@ -134,7 +144,7 @@ func (p *diagramPool) work() {
 			if ctx.Err() != nil {
 				result = diagramResult{err: ctx.Err()}
 			}
-			if errors.Is(result.err, context.Canceled) || errors.Is(result.err, context.DeadlineExceeded) {
+			if usedRuntime && (errors.Is(result.err, context.Canceled) || errors.Is(result.err, context.DeadlineExceeded)) {
 				release()
 			}
 			stop()

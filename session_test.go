@@ -64,7 +64,7 @@ func TestOutOfOrderLoadPublication(t *testing.T) {
 	s := &documentSession{source: "initial"}
 	_, first := s.beginLoad()
 	_, second := s.beginLoad()
-	if s.complete(first, "obsolete", nil) || !s.loading || s.source != "initial" {
+	if s.complete(first, "obsolete", nil) || !s.loading || s.source != "" {
 		t.Fatal("old result changed current loading session")
 	}
 	if !s.complete(second, "latest", nil) || s.loading || s.source != "latest" {
@@ -75,7 +75,7 @@ func TestOutOfOrderLoadPublication(t *testing.T) {
 	}
 	_, third := s.beginLoad()
 	s.close()
-	if s.complete(third, "after-close", nil) || s.source != "latest" {
+	if s.complete(third, "after-close", nil) || s.source != "" {
 		t.Fatal("closed session accepted a completion")
 	}
 }
@@ -91,7 +91,7 @@ func TestWorkerSerializesAndExpiresQueuedJobs(t *testing.T) {
 	r.submit(diagramKey{code: "first"}, func(result diagramResult) { finished <- result })
 	go func() {
 		defer close(exited)
-		r.run(func(ctx context.Context, key diagramKey) diagramResult {
+		r.run(func(ctx context.Context, key diagramKey, _ func() bool) diagramResult {
 			started <- key.code
 			select {
 			case <-release:
@@ -139,19 +139,43 @@ func TestSessionReleasesPreparedDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &documentSession{prepared: prepared}
+	s := &documentSession{prepared: prepared, source: "# Old"}
 	_, version := s.beginLoad()
-	if s.prepared.parsed != nil {
+	if s.prepared.parsed != nil || s.source != "" {
 		t.Fatal("reload retained the previous parse")
 	}
 	if !s.completePrepared(version, "# Old", prepared, nil) {
 		t.Fatal("current parse rejected")
 	}
 	s.close()
-	if s.prepared.parsed != nil {
+	if s.prepared.parsed != nil || s.source != "" {
 		t.Fatal("closed session retained parse ownership")
 	}
 	if s.completePrepared(version, "# Old", prepared, nil) {
 		t.Fatal("closed session adopted a late parse")
+	}
+}
+
+func TestDiagramQueueFollowsViewport(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := &diagramRenderer{ctx: ctx, cancel: cancel, jobs: make(chan diagramJob, 8)}
+	one, two, three := diagramKey{code: "one"}, diagramKey{code: "two"}, diagramKey{code: "three"}
+	r.submit(one, nil)
+	r.submit(two, nil)
+	r.submit(three, nil)
+	r.reconcile(map[diagramKey]float32{two: 100, three: 0})
+	first, second := <-r.jobs, <-r.jobs
+	if first.key != three || second.key != two || len(r.jobs) != 0 {
+		t.Fatal("queue did not drop/reorder offscreen work")
+	}
+	first.cancel()
+	second.cancel()
+	r.submit(one, nil)
+	work := r.pending[one]
+	work.running = true
+	r.reconcile(map[diagramKey]float32{})
+	if (<-r.jobs).ctx.Err() != nil {
+		t.Fatal("scroll cancelled executing WebKit task")
 	}
 }

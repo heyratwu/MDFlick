@@ -22,6 +22,7 @@ type readerWindow struct {
 	win            *mygo.Window
 	md             *markdown.Options
 	diagrams       *diagramService
+	diagramFrame   map[diagramKey]float32
 	blockIndent    float32
 	scroll         ui.ScrollState
 	html           readerHTMLState
@@ -59,8 +60,11 @@ func (a *readerWindow) view(c *ui.Context) {
 			}
 			a.md.Theme = readerTheme(t.Dark)
 			a.md.CodeBlock = a.codeBlock
+			a.md.HighlightLimit = readerHighlightLimit
 			a.md.BlockStyle = a.readerBlockStyle
 			a.md.OnLink = a.linkHandler(c)
+			finishDiagrams := a.beginDiagramFrame(c)
+			defer finishDiagrams()
 			finishImages := a.beginImageFrame(c)
 			defer finishImages()
 			left, prose, _ := readerWidths(c)
@@ -135,6 +139,7 @@ func (a *readerWindow) load() {
 func (a *readerWindow) closeDiagrams() {
 	a.diagrams.close()
 	a.diagrams = nil
+	a.diagramFrame = nil
 }
 
 func (a *readerWindow) close() {

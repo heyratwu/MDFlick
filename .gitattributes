@@ -1,0 +1,2 @@
+# Unified patches intentionally contain a leading context marker before tabs.
+patches/*.patch -whitespace

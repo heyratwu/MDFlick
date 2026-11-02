@@ -178,3 +178,27 @@ func TestDiagramPoolCloseCancelsActiveAndQueued(t *testing.T) {
 		receiveDiagram(t, closed)
 	}
 }
+
+func TestCancelledQueuedDiagramDoesNotDestroyHealthyRuntime(t *testing.T) {
+	p := newDiagramPool(nil)
+	defer p.close()
+	// One worker makes ownership deterministic; production starts two.
+	p.once.Do(func() { go p.work() })
+	created := 0
+	create := func() (diagramRuntime, error) {
+		created++
+		return &testDiagramRuntime{renderFn: func(context.Context, diagramKey) diagramResult { return diagramResult{} }}, nil
+	}
+	if result := p.render(context.Background(), diagramKey{}, create); result.err != nil {
+		t.Fatal(result.err)
+	}
+	if result := p.renderWithStart(context.Background(), diagramKey{}, create, func() bool { return false }); result.err != context.Canceled {
+		t.Fatal("obsolete job executed", result.err)
+	}
+	if result := p.render(context.Background(), diagramKey{}, create); result.err != nil {
+		t.Fatal(result.err)
+	}
+	if created != 1 {
+		t.Fatal("queued cancellation destroyed reusable runtime", created)
+	}
+}

@@ -238,3 +238,31 @@ func TestImageSchedulerWaitsForLayoutAfterDecode(t *testing.T) {
 		t.Fatal("stale visibility queue retained")
 	}
 }
+
+func TestEvictedImageKeepsLayoutAndResizes(t *testing.T) {
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/geometry.md", source: "![picture](picture.png)\n\nAfter image."}}
+	a.resetMarkdown(context.Background(), a.path)
+	defer a.releaseImages()
+	prepareTestReader(t, a)
+	key, _ := a.images.key("picture.png")
+	ready := make(chan struct{})
+	close(ready)
+	a.images.entries[key] = &imageEntry{done: ready, image: ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1200, 600)))}
+	tt := ui.NewTester(a.view, 900, 720)
+	before, _ := tt.Find("After image.")
+	a.images.mu.Lock()
+	a.images.wanted = map[string]float32{}
+	a.images.evictLocked(a.images.limit+1, false, false)
+	a.images.maxEntries = 0 // keep this geometry test independent of background I/O
+	a.images.mu.Unlock()
+	tt.Frame()
+	after, _ := tt.Find("After image.")
+	if math.Abs(float64(before.Y-after.Y)) > 0.5 {
+		t.Fatal("eviction collapsed image", before, after)
+	}
+	tt.SetSize(600, 720)
+	smaller, _ := tt.Find("After image.")
+	if smaller.Y >= after.Y {
+		t.Fatal("placeholder failed to preserve aspect ratio on resize", smaller, after)
+	}
+}

@@ -69,3 +69,22 @@ func TestMermaidDefersOffscreenWork(t *testing.T) {
 	}
 	a.diagrams.close()
 }
+
+func TestEvictedDiagramKeepsLayout(t *testing.T) {
+	code := "flowchart LR; A-->B\n"
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/geometry.md", source: "```mermaid\n" + code + "```\n\nAfter diagram."}}
+	a.diagrams = newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})
+	defer a.diagrams.close()
+	prepareTestReader(t, a)
+	key := diagramKey{code: code}
+	a.diagrams.entries[key] = &diagramResult{image: ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1000, 500))), width: 1000, height: 500}
+	tt := ui.NewTester(a.view, 900, 720)
+	before, _ := tt.Find("After diagram.")
+	a.diagrams.wanted = map[diagramKey]float32{}
+	a.diagrams.evict(diagramCacheBudget+1, false)
+	tt.Frame()
+	after, _ := tt.Find("After diagram.")
+	if before.Y != after.Y {
+		t.Fatal("eviction collapsed diagram", before, after)
+	}
+}

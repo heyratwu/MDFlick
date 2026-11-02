@@ -44,6 +44,8 @@ type Options struct {
 	// WrapCode wraps the lines of code blocks rather than scrolling them
 	// sideways.
 	WrapCode bool
+	// HighlightLimit renders larger code blocks as plain selectable text. Zero is unlimited.
+	HighlightLimit int
 	// Math, when set, builds blocks of display math from their TeX, which
 	// show as their TeX without it; math within text shows as its TeX.
 	Math func(c *ui.Context, tex string)

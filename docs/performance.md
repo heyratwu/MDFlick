@@ -146,3 +146,52 @@ Swift 使用 OSLog 的 `com.mdflick.app.QuickLook` / `Preview` 分类记录排�
 普通文本样本耗时约下降 62%、累计分配下降 49%。原始 HTML 语料保留 DOM 过滤，没有获得此优化收益；本次耗时约增加 3%，不解释为稳定退化幅度。分配为累计量，不是 RSS。
 
 新增阶段 `preview.inspect` 检查输出路径；普通 Markdown 使用 `preview.direct`，原始 HTML 仍记录 `preview.markdown-html`、`preview.dom` 和 `preview.sanitize`。两条路径均记录 `preview.output`。图表的 Swift content-ready 日志现仅代表初始视口批次，离屏图表不纳入该事件；不能将其视作全文图表渲染完毕。
+
+## 2026-11-02：按优化顺序实施与基线
+
+本轮完成会话原文释放、Mermaid 视口等待队列、可回收图片/图表缓存及大代码块高亮上限。普通正文的布局方式未改变，不宣称普通长文整体提速。
+
+诊断脚本新增 `--summary <json>`，记录各请求打开至提交耗时、从进程启动观察到提交的时间、RSS 采样与峰值、窗口关闭时的 Go 堆快照、退出是否由脚本强制。`--sample-after N` 排除启动后的前 N 秒帧记录；该参数不会自动滚动，也不会自动识别哪些帧由滚动引起。
+
+```sh
+python3 scripts/make-perf-fixtures.py
+# 在独立进程中运行，完成滚动后正常关闭窗口；不与构建或其他基准并行。
+python3 scripts/profile-macos.py --sample-after 2 --summary build/perf/long-native.json \
+  build/perf/MDFlick build/perf/fixtures/long.md
+CGO_ENABLED=0 go test -run '^$' -bench 'Benchmark(LargeCodeFirstFrame|NativeOpen|NativeScroll)$' \
+  -benchmem -benchtime=20x -count=3 .
+```
+
+2026-11-02、Apple M4 / darwin-arm64 的本地单次原生运行：
+
+| 场景 | 请求打开至提交 | 从进程启动观察到提交 | 主进程采样峰值 RSS |
+| --- | ---: | ---: | ---: |
+| 5,000 段中英文正文，随后实际滚动 | 144.67 ms | 456.35 ms | 395.39 MiB |
+| 图片 + Mermaid 两窗口，随后滚动图表 | 69.31 / 80.92 ms | 690.64 / 703.58 ms | 151.08 MiB |
+
+长文运行中，在启动两秒后采集 188 帧，包含滚动、惯性滚动及退出前交互，p50 25.35 ms、p95 46.5 ms、最大 104.6 ms。它明确显示长文仍存在 UI 工作量问题；这是当前基线，不是优化前后比较，也不是严格限定到滚动事件的延迟分布。原生窗口内容、图表渲染、图表滚动和图片首屏已经视觉检查；第二个原生窗口的图片滚动受自动化坐标错误影响，未形成该场景的原生滚动验证，缓存回收、返回和尺寸稳定由 headless 回归覆盖。
+
+上述两次运行均正常关闭并以 0 退出，逻辑资源预算在最后窗口关闭后归零。长文关闭事件的 Go 堆对象为 243,388,640 字节、Go retained 为 291,481,928 字节；没有主动 GC，不能把该时刻的值当成仍被会话引用的对象大小，也不能据此声称关闭后 RSS 已下降。关闭最后窗口会退出，因此不具备关闭后的存活进程 RSS 样本。WebKit XPC 进程可能重挂至 launchd，脚本的子进程 RSS 不代表全应用内存。
+
+原始日志和 JSON 保存在本地 `build/perf/`，不纳入版本控制；各语料、机器状态和窗口数不同，不能互相计算性能改善幅度。
+
+### 大代码块高亮对照
+
+相同 1,800 行 Go 代码和当前框架，仅切换 `Options.HighlightLimit`，`-benchtime=20x -count=3` 取中位数。计时只含 headless 首帧构建、布局和软件绘制，不含文档预处理、磁盘、GPU 或应用代码块宽度测量。
+
+| 模式 | ms/op | 累计分配 MiB/op |
+| --- | ---: | ---: |
+| 无限高亮 | 3.016 | 12.71 |
+| 32 KiB 后纯文本 | 1.286 | 3.49 |
+
+这个样本耗时约下降 57%、累计分配约下降 73%。大代码块仍完整布局，单行文本 shaping 仍可能耗时；高亮上限不等于布局上限。小代码块继续高亮。回归覆盖超大代码完整复制、主题切换及文档替换。
+
+将同一 MyGo 版本的 counter-native 和 hello 示例分别链接到本轮修改前后依赖，并使用相同的 `-trimpath -tags mygo_noinspector -ldflags="-s -w -X github.com/egoist/mygo.production=1"` 构建：counter-native 均为 9,373,330 字节、hello 均为 9,562,178 字节，未增加不使用 Markdown 的示例产物大小。
+
+### 长文虚拟化的兼容性边界
+
+本轮完成可行性评估，未启用块级虚拟化。`ui/markdown/view.go` 的 `st.elems` 记录本帧已构建的文本元素；`copy.go` 的纯文本复制使用实际选区中的元素，而 `ui.List` 只构建可见行。直接换成 List 会让全选/跨视口纯文本复制遗漏未构建的段落，也会使现有 `BlockStyle` 驱动的离屏标题跳转无法触达目标。
+
+已增加 `TestLongDocumentCopiesBeyondViewport`，用 1,200 段带链接正文验证全选复制确实包含全部段落和末尾标题；现有测试继续覆盖引用、跨表格选择、标题锚点和宽表格。这些是后续虚拟化的兼容性门槛，不能以仅显示首屏的测试替代。
+
+后续实现需先将选区端点、纯文本/Markdown/HTML 导出和锚点索引建立在文档块坐标上，再接入可变高度的块窗口与宽度/主题失效机制。应验证跨离屏区拖选、全文复制、表格/嵌套列表、图片尺寸变化、锚点跳转、窗口缩放以及辅助功能。满足上述条件后，再以相同长文的真实帧耗时和内存验证收益。
