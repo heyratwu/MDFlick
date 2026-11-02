@@ -73,9 +73,9 @@ func (a *readerWindow) view(c *ui.Context) {
 			defer finishImages()
 			left, prose, _ := readerWidths(c)
 			ui.Scroll(c).Key(struct {
-				Path       string
-				Generation uint64
-			}{a.path, a.generation}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
+				Path     string
+				Revision uint64
+			}{a.path, a.revision}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
 				ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(40, 0, 120, 0).FontWeight(400).Children(func() {
 					markdown.ViewDocument(c, a.prepared.parsed, a.md)
 					if a.source == "" {
@@ -88,6 +88,14 @@ func (a *readerWindow) view(c *ui.Context) {
 }
 
 func (a *readerWindow) load() {
+	a.loadDocument(false)
+}
+
+func (a *readerWindow) refresh() {
+	a.loadDocument(a.prepared.parsed != nil && !a.loading && a.failure == "")
+}
+
+func (a *readerWindow) loadDocument(refresh bool) {
 	if a.closed {
 		return
 	}
@@ -100,8 +108,15 @@ func (a *readerWindow) load() {
 		started = time.Now()
 	}
 	a.openStarted = time.Time{}
-	ctx, generation := a.beginLoad()
-	a.scroll = ui.ScrollState{}
+	var ctx context.Context
+	var generation uint64
+	previous := a.source
+	if refresh {
+		ctx, generation = a.beginRefresh()
+	} else {
+		ctx, generation = a.beginLoad()
+		a.scroll = ui.ScrollState{}
+	}
 	a.performance = readerPerformance{}
 	if diagnostics.Enabled() {
 		ctx = diagnostics.WithRequest(ctx)
@@ -114,25 +129,34 @@ func (a *readerWindow) load() {
 	if a.watchCancel == nil && path != "" {
 		watchCtx, a.watchCancel = context.WithCancel(context.Background())
 	}
-	a.closeDiagrams()
-	a.releaseImages()
+	if !refresh {
+		a.closeDiagrams()
+		a.releaseImages()
+	}
 	go func() {
 		if watchCtx != nil {
 			watchReaderFile(watchCtx, path, func() {
 				win.Update(func() {
 					if !a.closed && a.path == path {
-						a.load()
+						a.refresh()
 					}
 				})
 			})
 		}
-		source, prepared, err := loadReaderDocument(ctx, path, resources)
+		source, prepared, err := loadReaderDocumentIfChanged(ctx, path, resources, previous, refresh)
 		if ctx.Err() != nil {
 			return
 		}
 		win.Update(func() {
-			if !a.completePrepared(generation, source, prepared, err) {
-				return
+			if refresh {
+				if !a.completeRefresh(generation, source, prepared, err) {
+					return
+				}
+				a.closeDiagrams()
+			} else {
+				if !a.completePrepared(generation, source, prepared, err) {
+					return
+				}
 			}
 			if err != nil {
 				return
@@ -199,6 +223,10 @@ func (a *readerWindow) releaseImages() {
 // Hold a slot through both read and preparation; queued windows do not retain
 // file contents. Timeout applies to this operation, not the image-store lifetime.
 func loadReaderDocument(parent context.Context, path string, resources *applicationResources) (string, preparedReaderDocument, error) {
+	return loadReaderDocumentIfChanged(parent, path, resources, "", false)
+}
+
+func loadReaderDocumentIfChanged(parent context.Context, path string, resources *applicationResources, previous string, compare bool) (string, preparedReaderDocument, error) {
 	ctx, cancel := context.WithTimeout(parent, document.NativeLimits().Timeout)
 	defer cancel()
 	if err := acquireWork(ctx, resources.loads); err != nil {
@@ -210,6 +238,9 @@ func loadReaderDocument(parent context.Context, path string, resources *applicat
 	diagnostics.Record(ctx, "native.read", started, len(source))
 	if err != nil {
 		return "", preparedReaderDocument{}, err
+	}
+	if compare && source == previous {
+		return source, preparedReaderDocument{}, nil
 	}
 	prepared, err := prepareReaderDocument(ctx, source)
 	if err != nil {

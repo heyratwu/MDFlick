@@ -10,9 +10,15 @@ type documentSession struct {
 	loading, closed       bool
 	generation            uint64
 	cancel                context.CancelFunc
+	refreshCancel         context.CancelFunc
+	revision              uint64
 }
 
 func (s *documentSession) beginLoad() (context.Context, uint64) {
+	if s.refreshCancel != nil {
+		s.refreshCancel()
+		s.refreshCancel = nil
+	}
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -28,6 +34,9 @@ func (s *documentSession) beginLoad() (context.Context, uint64) {
 }
 func (s *documentSession) accepts(version uint64) bool { return !s.closed && s.generation == version }
 func (s *documentSession) close() {
+	if s.refreshCancel != nil {
+		s.refreshCancel()
+	}
 	s.closed = true
 	s.prepared = preparedReaderDocument{}
 	s.source = ""
@@ -59,6 +68,38 @@ func (s *documentSession) completePrepared(version uint64, source string, prepar
 	}
 	if err == nil {
 		s.prepared = prepared
+		s.revision++
 	}
 	return true
+}
+
+// Keep the published parse and its image context alive while checking a save.
+func (s *documentSession) beginRefresh() (context.Context, uint64) {
+	if s.refreshCancel != nil {
+		s.refreshCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.refreshCancel = cancel
+	s.generation++
+	return ctx, s.generation
+}
+
+func (s *documentSession) completeRefresh(version uint64, source string, prepared preparedReaderDocument, err error) bool {
+	if !s.accepts(version) {
+		return false
+	}
+	if err != nil || source == s.source {
+		// A transient read failure during an atomic save must not hide the
+		// current preview. A later create/write event retries the read.
+		if s.refreshCancel != nil {
+			s.refreshCancel()
+			s.refreshCancel = nil
+		}
+		return false
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.cancel, s.refreshCancel = s.refreshCancel, nil
+	return s.completePrepared(version, source, prepared, nil)
 }
