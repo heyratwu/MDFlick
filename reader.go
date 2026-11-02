@@ -44,10 +44,12 @@ func (a *readerWindow) view(c *ui.Context) {
 				ui.Button(c, "重试").OnClick(a.load)
 			})
 		} else if a.path == "" {
-			ui.Column(c).Grow(1).Center().Gap(16).Padding(32).Children(func() {
+			// The extra 100 DIPs below move the centered welcome content up 50.
+			ui.Column(c).Grow(1).Center().Gap(16).Padding(32, 32, 132, 32).Children(func() {
 				ui.Text(c, "轻松阅读 Markdown").FontSize(20)
 				ui.Text(c, "在 Finder 中选中文件，按空格即可快速预览。").TextColor(t.TextMuted)
-				ui.PrimaryButton(c, "打开文件…").OnClick(func() {
+				// Match a regular button's 1-DIP border without changing the accent face.
+				ui.PrimaryButton(c, "打开文件…").Border(1, ui.Transparent).OnClick(func() {
 					if a.open != nil {
 						a.open()
 					}
