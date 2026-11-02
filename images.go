@@ -114,6 +114,10 @@ func decodeImage(ctx context.Context, data []byte, isSVG bool, reserve func(int6
 		if err != nil {
 			return nil, err
 		}
+		normalized, err = nativeSVGText(ctx, normalized)
+		if err != nil {
+			return nil, err
+		}
 		// SVG structures vary: charge a conservative source-based estimate.
 		if err := reserve(int64(max(len(data), len(normalized)))*8 + 4096); err != nil {
 			return nil, err

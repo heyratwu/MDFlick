@@ -13,6 +13,7 @@
 | 主题图片 | `<picture>` 内匹配 `prefers-color-scheme: dark/light` 的 `<source srcset>`；主题变化重新选择来源；没有对应来源时使用 `<img src>` |
 | `srcset` | 使用第一个候选地址；不根据屏幕密度、视口断点或 `sizes` 选择候选；`img` 没有 `src` 时可使用其 `srcset` |
 | SVG 图片颜色 | 外部 SVG 中简单的根级 CSS 颜色变量与回退值；浅色黑/深色白的变量映射到原生主题文字色，避免徽章透明；其余颜色使用浅色定义 |
+| SVG 图片文字（macOS） | 普通 `text`/`tspan` 与 `foreignObject` 中静态 `div`/`span` 等文字使用 Core Text 排版并转换成矢量路径；支持基本字体、字号、粗斜体、颜色、字距、对齐、换行及区域裁剪 |
 | 列表 | `ul`、`ol`、`li`；保留有序列表的 `start`，支持嵌套列表和列表项内段落 |
 | 表格 | `table`、`thead`、`tbody`、`tr`、`th`、`td` 映射为原生 Markdown 表格；第一行作为表头 |
 | 引用 | `blockquote`，包括其中的段落和行内格式 |
@@ -28,6 +29,7 @@ HTML 块内的空白按 HTML 规则折叠；原生 Markdown、行内代码与围
 
 - 正文文字中夹杂的图片、表格单元格内的图片仍采用 MyGo 的替代文字显示；实际图片渲染适用于图片段落及只包含图片的标题。
 - 不实现任意 CSS、`class`、`style`、定位布局、表单、音视频、内联 SVG 或浏览器脚本。
+- SVG 文字采用静态子集：不实现 `textPath`、逐字符坐标列表、复杂 HTML/CSS 布局及彩色字形；使用本机字体回退，不加载网页字体或外部 HTML 资源。文字内容最多 64 KiB，展开后的 SVG 最多 16 MiB，转换结果继续计入图片缓存预算；转换在图片加载 worker 中完成，取消时不发布部分结果。
 - 表格不实现 `rowspan`、`colspan`、嵌套表格和单元格 CSS；列表不实现 `reversed` 和单项 `value`。
 - `script`、`style`、`iframe`、`object`、`template` 的内容丢弃。HTML 注释不显示。
 - 位图是图像元素，加载后不作为可拖选文字参与纯文本复制；跨正文选区复制 Markdown 时仍保留中间图片源码。
@@ -36,6 +38,8 @@ HTML 块内的空白按 HTML 规则折叠；原生 Markdown、行内代码与围
 ## 验证
 
 `internal/document/html_test.go` 覆盖转换后的节点、图片元数据、主题来源、空白、嵌套列表、基础表格、引用、文字格式、代码字面量、主动内容过滤与取消/资源限制。
+
+`svg_text_darwin_test.go` 使用真实 Trendshift SVG 固定样例，检查文字区域实际像素、普通 SVG 文字、原始图形保留、静态 HTML 过滤、并发排版与取消。可用 `MDFLICK_SVG_TEXT_SCREENSHOT=/tmp/mdflick-trendshift-fixed.png` 导出渲染结果。
 
 `svg_variables_test.go` 检查 SVG 根级变量、别名、回退、循环引用，以及深浅主题下的实际绘制像素。
 
