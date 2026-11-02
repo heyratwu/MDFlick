@@ -24,6 +24,14 @@
 
 图表结果回调绑定所属服务，不查找“当前窗口的缓存”。旧服务一旦关闭，即使已有发布回调在 UI 队列中，也不能恢复旧缓存。缓存满时先回收本服务的离屏结果；可见项仍无法容纳时保留源码并设置重试间隔。准入在帧提交后根据当前视口进行，避免 UI 重建时循环提交。
 
+## 原生图片包边界
+
+`internal/svg` 负责 SVG 根 CSS 变量归一化、文字与静态 `foreignObject` 转路径，统一通过 `Normalize` 调用；转换输出上限为 16 MiB。它不依赖 MyGo，macOS 字形轮廓实现仍使用 Core Text / Core Graphics，其他平台保留不支持文字轮廓的错误行为。转换单测在该包内，MyGo 解析和实际绘制验证保留在原生适配层。
+
+`internal/imagecache.Store[T]` 负责地址归一化、并发去重、文档与应用预算、离屏回收、取消和失败重试；仅依赖标准库。构造时注入 `Loader[T]`，加载器在分配保留资源前调用 `reserve`，失败或取消时由缓存归还预留预算。地址准入策略通过 `Config.AllowSource` 注入，原生应用继续使用 `document.NativePolicy().AllowsImage`。
+
+根包的 `image_store.go` 只装配 `Store[ui.ImageSource]`、原生加载函数和诊断记录；文件/HTTP 读取、MyGo 图片解码留在 `images.go`。`reader_images.go` 保留帧提交、Handle 几何和视口调度，通过缓存方法访问状态，不再直接操作缓存锁或条目。缓存策略测试使用假加载器，不需要 UI 框架、文件或网络；解码和视口集成测试继续覆盖原生适配层。
+
 ## 原生预处理边界
 
 原文首次解析后，HTML 转换复用语法树；仅转换结果发生变化时再解析转换后的 Markdown。最终文档的段落、标题和表格单元格 inline 在 worker 中预热，检查取消后将整份 `parser.Document` 独占移交 UI 线程。解析器仍有可变缓存，发布后 worker 不再访问，不跨窗口或 Markdown 视图共享。

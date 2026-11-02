@@ -1,6 +1,6 @@
 //go:build darwin
 
-package main
+package svg
 
 import (
 	"context"
@@ -133,7 +133,7 @@ func initSVGTextNative() {
 			api.output.WriteByte(' ')
 			api.output.WriteString(svgNumber(-p.y - api.y))
 		}
-		if api.output.Len() > maxImageBytes {
+		if api.output.Len() > maxOutputBytes {
 			api.outputErr = fmt.Errorf("SVG 文字轮廓过大")
 		}
 	})

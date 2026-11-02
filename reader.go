@@ -207,14 +207,14 @@ func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
 	a.imageScheduler = newImageScheduler(a.images)
 	a.md = &markdown.Options{
 		Code:      map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock},
-		LoadImage: a.images.load,
+		LoadImage: a.images.Load,
 	}
 }
 
 func (a *readerWindow) releaseImages() {
 	a.imageScheduler = nil
 	if a.images != nil {
-		a.images.close()
+		a.images.Close()
 		a.images = nil
 	}
 	a.md = nil

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"mdflick/internal/imagecache"
 )
 
 func imageEvent[T any](t *testing.T, ch <-chan T) T {
@@ -47,13 +49,11 @@ func TestReaderImagesWaitForCommittedViewport(t *testing.T) {
 	}
 	firstKey := server.URL + "/first"
 	// The HTTP handler runs only after admission, so this joins the existing load.
-	if _, err := a.images.load(firstKey); err != nil {
+	if _, err := a.images.Load(firstKey); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	a.images.mu.Lock()
-	_, distantAdmitted := a.images.entries[server.URL+"/last"]
-	a.images.mu.Unlock()
+	distantAdmitted := a.images.Contains(server.URL + "/last")
 	if distantAdmitted {
 		t.Fatal("offscreen image allocated cache entry")
 	}
@@ -73,7 +73,7 @@ func TestReaderImagesWaitForCommittedViewport(t *testing.T) {
 	if got := imageEvent(t, started); got != "/last" {
 		t.Fatal("scroll did not admit aligned image", got)
 	}
-	if _, err := a.images.load(server.URL + "/last"); err != nil {
+	if _, err := a.images.Load(server.URL + "/last"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -109,7 +109,7 @@ func TestImageSchedulerPrioritizesVisibleAndCancelsObsolete(t *testing.T) {
 	}))
 	defer server.Close()
 	store := newImageStore(context.Background(), "/tmp/scheduler.md", imageTestResources(4096, 2))
-	defer store.close()
+	defer store.Close()
 	scheduler := newImageScheduler(store)
 	changed := make(chan struct{}, 16)
 	invalidate := func() { changed <- struct{}{} }
@@ -125,9 +125,7 @@ func TestImageSchedulerPrioritizesVisibleAndCancelsObsolete(t *testing.T) {
 		imageEvent(t, cancelled)
 		imageEvent(t, changed)
 	}
-	store.mu.Lock()
-	entries, used := len(store.entries), store.used
-	store.mu.Unlock()
+	entries, used := store.Stats()
 	if entries != 0 || used != 0 {
 		t.Fatal("cancelled images retained entries/budget", entries, used)
 	}
@@ -137,16 +135,26 @@ func TestImageSchedulerPrioritizesVisibleAndCancelsObsolete(t *testing.T) {
 		t.Fatal("obsolete queued work was dispatched", got)
 	}
 	imageEvent(t, changed)
-	if im, ready := store.peek(visible); !ready || im == nil {
+	if im, ready := store.Peek(visible); !ready || im == nil {
 		t.Fatal("cancelled image did not retry")
 	}
 }
 
 func TestImageSchedulerCancelsApplicationSlotWait(t *testing.T) {
 	resources := imageTestResources(4096, 1)
-	resources.slots <- struct{}{} // Another document owns the application slot.
+	started := make(chan struct{})
+	owner := imagecache.New(context.Background(), "/tmp/owner.md", resources, imagecache.DefaultConfig(), func(ctx context.Context, _, _ string, _ func(int64) error) (int, error) {
+		close(started)
+		<-ctx.Done()
+		return 0, ctx.Err()
+	})
+	done := make(chan error, 1)
+	go func() { _, err := owner.Load("owned.png"); done <- err }()
+	imageEvent(t, started)
+	defer owner.Close()
+
 	store := newImageStore(context.Background(), "/tmp/slot.md", resources)
-	defer store.close()
+	defer store.Close()
 	scheduler := newImageScheduler(store)
 	changed := make(chan struct{}, 2)
 	scheduler.update(map[string]float32{"/tmp/not-read.png": 0}, func() { changed <- struct{}{} })
@@ -159,10 +167,15 @@ func TestImageSchedulerCancelsApplicationSlotWait(t *testing.T) {
 	if active > 0 {
 		imageEvent(t, changed)
 	}
-	if len(resources.slots) != 1 {
-		t.Fatal("cancellation released another document's slot")
+	select {
+	case err := <-done:
+		t.Fatal("cancellation interrupted another document", err)
+	default:
 	}
-	<-resources.slots
+	owner.Close()
+	if err := imageEvent(t, done); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
 }
 
 func TestImageViewportBoundsAndCollectionLimit(t *testing.T) {
@@ -205,7 +218,7 @@ func TestImageSchedulerWaitsForLayoutAfterDecode(t *testing.T) {
 	}))
 	defer server.Close()
 	store := newImageStore(context.Background(), "/tmp/batch.md", imageTestResources(4096, 2))
-	defer store.close()
+	defer store.Close()
 	scheduler := newImageScheduler(store)
 	changed := make(chan struct{}, 8)
 	invalidate := func() { changed <- struct{}{} }
@@ -244,17 +257,27 @@ func TestEvictedImageKeepsLayoutAndResizes(t *testing.T) {
 	a.resetMarkdown(context.Background(), a.path)
 	defer a.releaseImages()
 	prepareTestReader(t, a)
-	key, _ := a.images.key("picture.png")
-	ready := make(chan struct{})
-	close(ready)
-	a.images.entries[key] = &imageEntry{done: ready, image: ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1200, 600)))}
+	a.images.Close()
+	var loaded atomic.Bool
+	a.images = imagecache.New(context.Background(), a.path, imageTestResources(64<<20, 2), imagecache.DefaultConfig(), func(ctx context.Context, _, _ string, reserve func(int64) error) (ui.ImageSource, error) {
+		if loaded.Swap(true) {
+			return nil, errors.New("evicted test image")
+		}
+		if err := reserve(17 << 20); err != nil {
+			return nil, err
+		}
+		return ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1200, 600))), nil
+	})
+	a.imageScheduler = newImageScheduler(a.images)
+	a.md.LoadImage = a.images.Load
+	if _, err := a.images.Load("picture.png"); err != nil {
+		t.Fatal(err)
+	}
+
 	tt := ui.NewTester(a.view, 900, 720)
 	before, _ := tt.Find("After image.")
-	a.images.mu.Lock()
-	a.images.wanted = map[string]float32{}
-	a.images.evictLocked(a.images.limit+1, false, false)
-	a.images.maxEntries = 0 // keep this geometry test independent of background I/O
-	a.images.mu.Unlock()
+	a.images.UpdateViewport(map[string]float32{})
+
 	tt.Frame()
 	after, _ := tt.Find("After image.")
 	if math.Abs(float64(before.Y-after.Y)) > 0.5 {

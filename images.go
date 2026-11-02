@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -16,6 +15,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"mdflick/internal/imagecache"
+	"mdflick/internal/svg"
 )
 
 const maxImageBytes = 16 << 20
@@ -60,7 +61,7 @@ func loadDocumentImage(ctx context.Context, dir, source string, reserve func(int
 	return decodeImage(ctx, data, strings.EqualFold(filepath.Ext(path), ".svg"), reserve)
 }
 
-var errImageTemporary = errors.New("图片请求暂时失败")
+var errImageTemporary = imagecache.ErrTemporary
 
 const imageRequestTimeout = 15 * time.Second
 
@@ -110,11 +111,7 @@ func decodeImage(ctx context.Context, data []byte, isSVG bool, reserve func(int6
 		return nil, err
 	}
 	if isSVG {
-		normalized, err := nativeSVGVariables(ctx, data)
-		if err != nil {
-			return nil, err
-		}
-		normalized, err = nativeSVGText(ctx, normalized)
+		normalized, err := svg.Normalize(ctx, data)
 		if err != nil {
 			return nil, err
 		}

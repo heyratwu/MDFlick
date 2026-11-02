@@ -60,7 +60,7 @@ Outside the heading.`
 	}{{false, "/light"}, {true, "/dark"}, {false, "/light"}} {
 		tt.SetDark(theme.dark)
 		for _, path := range []string{theme.path, "/badge"} {
-			if _, err := a.images.load(server.URL + path); err != nil {
+			if _, err := a.images.Load(server.URL + path); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -242,7 +242,7 @@ func TestDeclaredImagePlaceholder(t *testing.T) {
 				t.Fatalf("placeholder overflowed narrow viewport: %+v", placeholder)
 			}
 			close(release)
-			if _, err := a.images.load(server.URL + "/image"); err != nil {
+			if _, err := a.images.Load(server.URL + "/image"); err != nil {
 				t.Fatal(err)
 			}
 			tt.Frame()

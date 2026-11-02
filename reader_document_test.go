@@ -25,8 +25,8 @@ func prepareTestReader(t *testing.T, a *readerWindow) {
 func testDocumentImages(t *testing.T, ctx context.Context, dir string) func(string) (ui.ImageSource, error) {
 	t.Helper()
 	s := newImageStore(ctx, filepath.Join(dir, "doc.md"), applicationImages)
-	t.Cleanup(s.close)
-	return s.load
+	t.Cleanup(s.Close)
+	return s.Load
 }
 
 func TestPreparedPublication(t *testing.T) {

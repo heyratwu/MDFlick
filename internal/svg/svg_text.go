@@ -1,4 +1,4 @@
-package main
+package svg
 
 import (
 	"bytes"
@@ -94,7 +94,7 @@ func nativeSVGText(ctx context.Context, data []byte) ([]byte, error) {
 				if err != nil {
 					return nil, err
 				}
-				if len(rendered)+before-last > maxImageBytes-output.Len() {
+				if len(rendered)+before-last > maxOutputBytes-output.Len() {
 					return nil, fmt.Errorf("SVG 文字展开过大")
 				}
 				output.Write(data[last:before])
@@ -109,7 +109,7 @@ func nativeSVGText(ctx context.Context, data []byte) ([]byte, error) {
 			}
 		}
 	}
-	if len(data)-last > maxImageBytes-output.Len() {
+	if len(data)-last > maxOutputBytes-output.Len() {
 		return nil, fmt.Errorf("SVG 文字展开过大")
 	}
 	output.Write(data[last:])
@@ -373,7 +373,7 @@ func renderSVGTextNode(ctx context.Context, root *svgTextNode, style svgTextStyl
 			chunk = append(chunk, svgPositionedText{outline, x, baseline, style.fill})
 			x += outline.width
 			pathBytes += len(outline.path)
-			if pathBytes > maxImageBytes {
+			if pathBytes > maxOutputBytes {
 				return fmt.Errorf("SVG 文字轮廓过大")
 			}
 		}
@@ -477,7 +477,7 @@ func renderSVGForeignText(ctx context.Context, root *svgTextNode, style svgTextS
 		baseline := top + (lineHeight-ascent-descent)/2 + ascent
 		for _, part := range line {
 			body.WriteString(svgTextPath(part.outline, part.x+shift, baseline, part.fill))
-			if body.Len() > maxImageBytes {
+			if body.Len() > maxOutputBytes {
 				return fmt.Errorf("SVG 文字轮廓过大")
 			}
 		}
@@ -509,7 +509,7 @@ func renderSVGForeignText(ctx context.Context, root *svgTextNode, style svgTextS
 			return "", err
 		}
 		pathBytes += len(outline.path)
-		if pathBytes > maxImageBytes {
+		if pathBytes > maxOutputBytes {
 			return "", fmt.Errorf("SVG 文字轮廓过大")
 		}
 		space := 0.0

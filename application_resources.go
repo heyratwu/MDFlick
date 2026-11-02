@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"mdflick/internal/diagnostics"
+	"mdflick/internal/imagecache"
 )
 
 // Owned by application, shared by its windows. Slots bound active work; callers
@@ -20,7 +21,7 @@ type applicationResources struct {
 func newApplicationResources() *applicationResources {
 	return &applicationResources{
 		loads: make(chan struct{}, 2), diagrams: make(chan struct{}, 2),
-		images:       &imageResources{limit: applicationImageBudget, slots: make(chan struct{}, 4)},
+		images:       imagecache.NewResources(applicationImageBudget, 4),
 		diagramCache: &byteBudget{limit: 128 << 20},
 	}
 }
@@ -65,9 +66,7 @@ func (r *applicationResources) record(stage string) {
 	if r == nil || !diagnostics.Enabled() {
 		return
 	}
-	r.images.mu.Lock()
-	images := r.images.used
-	r.images.mu.Unlock()
+	images := r.images.Used()
 	r.diagramCache.mu.Lock()
 	diagrams := r.diagramCache.used
 	r.diagramCache.mu.Unlock()

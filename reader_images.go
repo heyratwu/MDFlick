@@ -42,14 +42,14 @@ func (f *readerImageFrame) resolve(c *ui.Context, source string, box ui.Element)
 	if !document.NativePolicy().AllowsImage(source) {
 		return nil
 	}
-	key, err := s.key(source)
+	key, err := s.Key(source)
 	if err != nil {
 		return nil
 	}
 	geometry := *ui.Local(box, imageAnchorKey{}, func() *imageGeometry { return &imageGeometry{} })
 	anchor := &geometry.handle
 	box.Bind(anchor)
-	image, _ := s.peek(key)
+	image, _ := s.Peek(key)
 	switch src := image.(type) {
 	case *ui.Bitmap:
 		w, h := src.Size()
@@ -139,10 +139,10 @@ func (s *imageScheduler) signal() {
 func (s *imageScheduler) update(wanted map[string]float32, invalidate func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.store.ctx.Err() != nil {
+	if s.store.Context().Err() != nil {
 		return
 	}
-	if s.store.updateViewport(wanted) && invalidate != nil {
+	if s.store.UpdateViewport(wanted) && invalidate != nil {
 		invalidate()
 	}
 	s.invalidate, s.wanted = invalidate, wanted
@@ -154,10 +154,10 @@ func (s *imageScheduler) update(wanted map[string]float32, invalidate func()) {
 	}
 	s.pending = s.pending[:0]
 	for key, distance := range wanted {
-		if _, ready := s.store.peek(key); ready {
+		if _, ready := s.store.Peek(key); ready {
 			continue
 		}
-		if s.active[key] == nil && s.store.canAdmit(key) {
+		if s.active[key] == nil && s.store.CanAdmit(key) {
 			s.pending = append(s.pending, scheduledImage{key, distance})
 		}
 	}
@@ -186,24 +186,24 @@ func (s *imageScheduler) sortPending() {
 func (s *imageScheduler) work() {
 	for {
 		select {
-		case <-s.store.ctx.Done():
+		case <-s.store.Context().Done():
 			return
 		case <-s.wake:
 		}
 		for {
 			s.mu.Lock()
-			if s.awaitLayout || len(s.pending) == 0 || s.store.ctx.Err() != nil {
+			if s.awaitLayout || len(s.pending) == 0 || s.store.Context().Err() != nil {
 				s.mu.Unlock()
 				break
 			}
 			request := s.pending[0]
 			s.pending = s.pending[1:]
-			ctx, cancel := context.WithCancel(s.store.ctx)
+			ctx, cancel := context.WithCancel(s.store.Context())
 			job := &imageJob{cancel: cancel}
 			s.active[request.key] = job
 			s.mu.Unlock()
 
-			_, err := s.store.loadContext(ctx, request.key)
+			_, err := s.store.LoadContext(ctx, request.key)
 			cancel()
 			s.mu.Lock()
 			delete(s.active, request.key)
@@ -212,13 +212,13 @@ func (s *imageScheduler) work() {
 			s.awaitLayout = true
 			// A URL can return to the viewport while its cancelled job is unwinding.
 			// Retry it with a fresh context; cancellation is never a cached failure.
-			if distance, wanted := s.wanted[request.key]; wanted && errors.Is(err, context.Canceled) && s.store.ctx.Err() == nil {
+			if distance, wanted := s.wanted[request.key]; wanted && errors.Is(err, context.Canceled) && s.store.Context().Err() == nil {
 				s.pending = append(s.pending, scheduledImage{request.key, distance})
 				s.sortPending()
 			}
 			invalidate := s.invalidate
 			s.mu.Unlock()
-			if s.store.ctx.Err() == nil && invalidate != nil {
+			if s.store.Context().Err() == nil && invalidate != nil {
 				invalidate()
 			}
 		}

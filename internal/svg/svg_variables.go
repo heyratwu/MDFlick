@@ -1,4 +1,4 @@
-package main
+package svg
 
 import (
 	"bytes"
@@ -99,14 +99,14 @@ func nativeSVGVariables(ctx context.Context, data []byte) ([]byte, error) {
 			continue
 		}
 		extra := (match[0] - cursor) + len(value)
-		if extra > maxImageBytes-out.Len() {
+		if extra > maxOutputBytes-out.Len() {
 			return nil, fmt.Errorf("SVG 变量展开过大")
 		}
 		out.WriteString(source[cursor:match[0]])
 		out.WriteString(value)
 		cursor = match[1]
 	}
-	if len(source)-cursor > maxImageBytes-out.Len() {
+	if len(source)-cursor > maxOutputBytes-out.Len() {
 		return nil, fmt.Errorf("SVG 变量展开过大")
 	}
 	out.WriteString(source[cursor:])
