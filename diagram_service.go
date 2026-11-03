@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sort"
 	"time"
+
+	"mdflick/internal/imagecache"
 )
 
 const diagramCacheBudget int64 = 64 << 20
@@ -26,7 +28,7 @@ type diagramService struct {
 	publish func(func())
 	entries map[diagramKey]*diagramResult
 	bytes   int64
-	budget  *byteBudget
+	budget  *imagecache.ByteBudget
 	closed  bool
 	tickets map[diagramKey]uint64
 	next    uint64
@@ -34,7 +36,7 @@ type diagramService struct {
 	retries map[diagramKey]time.Time
 }
 
-func newDiagramService(backend diagramBackend, publish func(func()), budget *byteBudget) *diagramService {
+func newDiagramService(backend diagramBackend, publish func(func()), budget *imagecache.ByteBudget) *diagramService {
 	return &diagramService{backend: backend, publish: publish, budget: budget, entries: make(map[diagramKey]*diagramResult), tickets: make(map[diagramKey]uint64), retries: make(map[diagramKey]time.Time)}
 }
 
@@ -81,7 +83,7 @@ func (s *diagramService) commit(key diagramKey, result diagramResult) {
 	if result.bytes > 0 && s.wanted != nil {
 		s.evict(result.bytes, false)
 	}
-	if result.bytes < 0 || result.bytes > diagramCacheBudget-s.bytes || !s.budget.reserve(result.bytes) {
+	if result.bytes < 0 || result.bytes > diagramCacheBudget-s.bytes || !s.budget.TryReserve(result.bytes) {
 		result = diagramResult{err: errDiagramBudget}
 		s.retries[key] = time.Now().Add(2 * time.Second)
 	}
@@ -99,7 +101,7 @@ func (s *diagramService) close() {
 	clear(s.tickets)
 	clear(s.retries)
 	s.wanted = nil
-	s.budget.release(s.bytes)
+	s.budget.Release(s.bytes)
 	s.bytes = 0
 }
 
@@ -144,23 +146,20 @@ func (s *diagramService) update(wanted map[diagramKey]float32) {
 // Eviction happens after layout or before accepting a result, never in paint.
 // The view keeps dimensions separately, so dropping a bitmap does not move text.
 func (s *diagramService) evict(incoming int64, warm bool) {
+	policy := imagecache.EvictionPolicy{WarmBytes: diagramWarmBudget, WarmEntries: 64, ByteLimit: diagramCacheBudget}
+	mode := imagecache.ReserveBytes
+	if warm {
+		mode = imagecache.TrimWarm
+	}
 	for key, result := range s.entries {
 		if _, visible := s.wanted[key]; visible || result == nil {
 			continue
 		}
-		if warm && s.bytes <= diagramWarmBudget && len(s.entries) < 64 {
+		if !policy.NeedsEviction(mode, s.bytes, len(s.entries), incoming, s.budget.Available()) {
 			break
 		}
-		if !warm && incoming <= diagramCacheBudget-s.bytes {
-			s.budget.mu.Lock()
-			fits := incoming <= s.budget.limit-s.budget.used
-			s.budget.mu.Unlock()
-			if fits {
-				break
-			}
-		}
 		s.bytes -= result.bytes
-		s.budget.release(result.bytes)
+		s.budget.Release(result.bytes)
 		delete(s.entries, key)
 		delete(s.tickets, key)
 		delete(s.retries, key)

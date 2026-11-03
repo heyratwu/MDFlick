@@ -26,9 +26,8 @@ var ErrTemporary = errors.New("图片请求暂时失败")
 // Account for active document caches. This is an estimate, not a limit on total
 // process/GPU memory. Views retain geometry independently when offscreen bitmaps are reclaimed.
 type Resources struct {
-	mu          sync.Mutex
-	used, limit int64
-	slots       chan struct{}
+	budget *ByteBudget
+	slots  chan struct{}
 }
 
 type entry[T any] struct {
@@ -73,11 +72,11 @@ func DefaultConfig() Config {
 }
 
 func NewResources(limit int64, concurrency int) *Resources {
-	return &Resources{limit: limit, slots: make(chan struct{}, concurrency)}
+	return &Resources{budget: NewByteBudget(limit), slots: make(chan struct{}, concurrency)}
 }
 
 // Used reports estimated retained bytes across all stores sharing these resources.
-func (r *Resources) Used() int64 { r.mu.Lock(); defer r.mu.Unlock(); return r.used }
+func (r *Resources) Used() int64 { return r.budget.Used() }
 
 // New creates a document cache. Resources must be shared by stores belonging
 // to the same application, and loader must be non-nil.
@@ -116,9 +115,7 @@ func (s *Store[T]) Close() {
 		return
 	}
 	s.closed = true
-	s.resources.mu.Lock()
-	s.resources.used -= s.used
-	s.resources.mu.Unlock()
+	s.resources.budget.Release(s.used)
 	s.used = 0
 	clear(s.entries)
 	s.wanted = nil
@@ -246,13 +243,10 @@ func (s *Store[T]) loadOnce(ctx context.Context, key string) (T, error) {
 			return context.Canceled
 		}
 		s.evictLocked(bytes, false, false)
-		s.resources.mu.Lock()
-		defer s.resources.mu.Unlock()
-		if bytes > s.limit-s.used || bytes > s.resources.limit-s.resources.used {
+		if bytes < 0 || bytes > s.limit-s.used || !s.resources.budget.TryReserve(bytes) {
 			return ErrBudget
 		}
 		s.used += bytes
-		s.resources.used += bytes
 		reserved += bytes
 		if entry := s.entries[key]; entry != nil {
 			entry.bytes += bytes
@@ -269,9 +263,7 @@ func (s *Store[T]) loadOnce(ctx context.Context, key string) (T, error) {
 			entry.bytes = 0
 		}
 		if !s.closed {
-			s.resources.mu.Lock()
-			s.resources.used -= reserved
-			s.resources.mu.Unlock()
+			s.resources.budget.Release(reserved)
 			s.used -= reserved
 		}
 		s.mu.Unlock()
@@ -316,8 +308,16 @@ func (s *Store[T]) evictLocked(incoming int64, warm, admission bool) {
 	if s.wanted == nil {
 		return
 	} // direct loader callers have no viewport contract
-	s.resources.mu.Lock()
-	defer s.resources.mu.Unlock()
+	budget := s.resources.budget
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	policy := EvictionPolicy{WarmBytes: imageWarmBudget, WarmEntries: 64, ByteLimit: s.limit, EntryLimit: s.maxEntries}
+	mode := ReserveBytes
+	if warm {
+		mode = TrimWarm
+	} else if admission {
+		mode = AdmitEntry
+	}
 	for key, entry := range s.entries {
 		if _, keep := s.wanted[key]; keep {
 			continue
@@ -327,17 +327,11 @@ func (s *Store[T]) evictLocked(incoming int64, warm, admission bool) {
 		default:
 			continue
 		}
-		if warm && s.used <= imageWarmBudget && len(s.entries) < 64 {
-			break
-		}
-		if !warm && admission && len(s.entries) < s.maxEntries {
-			break
-		}
-		if !warm && !admission && incoming <= s.limit-s.used && incoming <= s.resources.limit-s.resources.used {
+		if !policy.NeedsEviction(mode, s.used, len(s.entries), incoming, budget.limit-budget.used) {
 			break
 		}
 		s.used -= entry.bytes
-		s.resources.used -= entry.bytes
+		budget.releaseLocked(entry.bytes)
 		delete(s.entries, key)
 	}
 }

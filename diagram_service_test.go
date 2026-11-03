@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"mdflick/internal/imagecache"
+)
 
 type fakeDiagramBackend struct {
 	callbacks        []func(diagramResult)
@@ -19,7 +23,7 @@ func (f *fakeDiagramBackend) close() { f.closed = true }
 func TestDiagramServiceLifetimeAndAdmission(t *testing.T) {
 	backend := &fakeDiagramBackend{}
 	var publications []func()
-	s := newDiagramService(backend, func(fn func()) { publications = append(publications, fn) }, &byteBudget{limit: 128 << 20})
+	s := newDiagramService(backend, func(fn func()) { publications = append(publications, fn) }, imagecache.NewByteBudget(128<<20))
 	key := diagramKey{code: "one"}
 	s.request(key)
 	s.request(key)
@@ -32,7 +36,7 @@ func TestDiagramServiceLifetimeAndAdmission(t *testing.T) {
 	}
 	s.close()
 	s.close()
-	current := newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})
+	current := newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() }, imagecache.NewByteBudget(128<<20))
 	publications[0]()
 	if !backend.closed || s.bytes != 0 || len(s.entries) != 0 || len(current.entries) != 0 {
 		t.Fatal("closed service retained or published results")
@@ -45,7 +49,7 @@ func TestDiagramServiceLifetimeAndAdmission(t *testing.T) {
 
 func TestDiagramServiceBudgetAndQueueFailure(t *testing.T) {
 	backend := &fakeDiagramBackend{}
-	s := newDiagramService(backend, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})
+	s := newDiagramService(backend, func(fn func()) { fn() }, imagecache.NewByteBudget(128<<20))
 	defer s.close()
 	one, two := diagramKey{code: "one"}, diagramKey{code: "two"}
 	s.request(one)
@@ -76,7 +80,7 @@ func TestDiagramServiceBudgetAndQueueFailure(t *testing.T) {
 
 func TestDiagramViewportRejectsCancelledPublication(t *testing.T) {
 	backend := &fakeDiagramBackend{}
-	s := newDiagramService(backend, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})
+	s := newDiagramService(backend, func(fn func()) { fn() }, imagecache.NewByteBudget(128<<20))
 	defer s.close()
 	key := diagramKey{code: "returning"}
 	s.update(map[diagramKey]float32{key: 0})
@@ -95,7 +99,7 @@ func TestDiagramViewportRejectsCancelledPublication(t *testing.T) {
 
 func TestDiagramViewportReclaimsForVisibleResult(t *testing.T) {
 	backend := &fakeDiagramBackend{}
-	budget := &byteBudget{limit: diagramCacheBudget}
+	budget := imagecache.NewByteBudget(diagramCacheBudget)
 	s := newDiagramService(backend, func(fn func()) { fn() }, budget)
 	defer s.close()
 	one, two := diagramKey{code: "one"}, diagramKey{code: "two"}
@@ -103,11 +107,39 @@ func TestDiagramViewportReclaimsForVisibleResult(t *testing.T) {
 	backend.callbacks[0](diagramResult{bytes: diagramCacheBudget})
 	s.update(map[diagramKey]float32{two: 0})
 	backend.callbacks[1](diagramResult{bytes: 1024})
-	if s.entries[one] != nil || s.entries[two].err != nil || s.bytes != 1024 || budget.used != 1024 {
-		t.Fatal("offscreen result pinned budget", s.bytes, budget.used)
+	if s.entries[one] != nil || s.entries[two].err != nil || s.bytes != 1024 || budget.Used() != 1024 {
+		t.Fatal("offscreen result pinned budget", s.bytes, budget.Used())
 	}
 	s.update(map[diagramKey]float32{one: 0})
 	if len(backend.callbacks) != 3 {
 		t.Fatal("evicted result could not return")
+	}
+}
+
+func TestDiagramReservationReclaimsWarmOffscreenResult(t *testing.T) {
+	backend := &fakeDiagramBackend{}
+	budget := imagecache.NewByteBudget(10)
+	s := newDiagramService(backend, func(fn func()) { fn() }, budget)
+	defer s.close()
+	one, two := diagramKey{code: "one"}, diagramKey{code: "two"}
+	s.update(map[diagramKey]float32{one: 0})
+	backend.callbacks[0](diagramResult{bytes: 4})
+	s.update(map[diagramKey]float32{two: 0})
+	if s.entries[one] == nil {
+		t.Fatal("warm result reclaimed before budget pressure")
+	}
+	backend.callbacks[1](diagramResult{bytes: 8})
+	if _, exists := s.entries[one]; exists || s.entries[two].err != nil || budget.Used() != 8 {
+		t.Fatal("hard reservation failed to reclaim warm offscreen result")
+	}
+	if _, exists := s.tickets[one]; exists {
+		t.Fatal("eviction retained publication ticket")
+	}
+
+	// A visible result cannot be reclaimed to make room for another visible key.
+	s.update(map[diagramKey]float32{one: 0, two: 0})
+	backend.callbacks[2](diagramResult{bytes: 4})
+	if s.entries[one].err != errDiagramBudget || s.entries[two].bytes != 8 || budget.Used() != 8 {
+		t.Fatal("visible result was evicted or failed reservation charged bytes")
 	}
 }

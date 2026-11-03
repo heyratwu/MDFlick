@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"mdflick/internal/imagecache"
 )
 
 func TestLoadAdmissionAndCancellation(t *testing.T) {
@@ -42,7 +44,7 @@ func TestLoadAdmissionAndCancellation(t *testing.T) {
 }
 
 func TestDiagramApplicationBudget(t *testing.T) {
-	budget := &byteBudget{limit: 12}
+	budget := imagecache.NewByteBudget(12)
 	firstBackend, secondBackend := &fakeDiagramBackend{}, &fakeDiagramBackend{}
 	publish := func(fn func()) { fn() }
 	first := newDiagramService(firstBackend, publish, budget)
@@ -52,22 +54,22 @@ func TestDiagramApplicationBudget(t *testing.T) {
 	firstBackend.callbacks[0](diagramResult{bytes: 8})
 	second.request(key)
 	secondBackend.callbacks[0](diagramResult{bytes: 8})
-	if second.entries[key].err == nil || budget.used != 8 {
-		t.Fatal("shared budget exceeded", budget.used)
+	if second.entries[key].err == nil || budget.Used() != 8 {
+		t.Fatal("shared budget exceeded", budget.Used())
 	}
 	first.close()
 	first.close()
-	if budget.used != 0 {
+	if budget.Used() != 0 {
 		t.Fatal("close did not return reservation")
 	}
 	next := diagramKey{code: "two"}
 	second.request(next)
 	secondBackend.callbacks[1](diagramResult{bytes: 8})
-	if second.entries[next].err != nil || budget.used != 8 {
+	if second.entries[next].err != nil || budget.Used() != 8 {
 		t.Fatal("released budget unavailable")
 	}
 	second.close()
-	if budget.used != 0 {
+	if budget.Used() != 0 {
 		t.Fatal("budget leaked")
 	}
 }

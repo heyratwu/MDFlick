@@ -8,11 +8,13 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
+
+	"mdflick/internal/imagecache"
 )
 
 func TestMermaidPreviewStates(t *testing.T) {
 	code := "flowchart LR\n A[中文] --> B[预览]\n"
-	a := &readerWindow{documentSession: documentSession{path: "/tmp/diagram.md", source: "```mermaid\n" + code + "```\n\n```go\nprintln(1)\n```"}, md: &markdown.Options{}, diagrams: newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})}
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/diagram.md", source: "```mermaid\n" + code + "```\n\n```go\nprintln(1)\n```"}, md: &markdown.Options{}, diagrams: newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() }, imagecache.NewByteBudget(128<<20))}
 	a.md.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock}
 	light := diagramKey{code, false}
 	dark := diagramKey{code, true}
@@ -50,7 +52,7 @@ func TestMermaidPreviewStates(t *testing.T) {
 func TestMermaidDefersOffscreenWork(t *testing.T) {
 	backend := &fakeDiagramBackend{}
 	source := "```mermaid\nflowchart LR; A-->B\n```\n\n" + strings.Repeat("Paragraph.\n\n", 100) + "```mermaid\nflowchart LR; X-->Y\n```"
-	a := &readerWindow{documentSession: documentSession{path: "/tmp/visible.md", source: source}, md: &markdown.Options{}, diagrams: newDiagramService(backend, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})}
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/visible.md", source: source}, md: &markdown.Options{}, diagrams: newDiagramService(backend, func(fn func()) { fn() }, imagecache.NewByteBudget(128<<20))}
 	a.md.Code = map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock}
 	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 600, 500)
@@ -73,7 +75,7 @@ func TestMermaidDefersOffscreenWork(t *testing.T) {
 func TestEvictedDiagramKeepsLayout(t *testing.T) {
 	code := "flowchart LR; A-->B\n"
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/geometry.md", source: "```mermaid\n" + code + "```\n\nAfter diagram."}}
-	a.diagrams = newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() }, &byteBudget{limit: 128 << 20})
+	a.diagrams = newDiagramService(&fakeDiagramBackend{}, func(fn func()) { fn() }, imagecache.NewByteBudget(128<<20))
 	defer a.diagrams.close()
 	prepareTestReader(t, a)
 	key := diagramKey{code: code}

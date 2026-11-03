@@ -3,6 +3,7 @@ package imagecache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -306,5 +307,23 @@ func TestCloseDiscardsLateResultAndReturnsBudgetOnce(t *testing.T) {
 	}
 	if n, used := s.Stats(); n != 0 || used != 0 || r.Used() != 0 {
 		t.Fatal("late result changed accounting", n, used, r.Used())
+	}
+}
+
+func TestWarmEvictionProtectsVisibleAndPendingEntries(t *testing.T) {
+	r := NewResources(1024, 2)
+	s := fixture(t, r, DefaultConfig(), countedLoader(0))
+	for i := range 64 {
+		if _, err := s.Load(fmt.Sprintf("%d.png", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	visible, _ := s.Key("0.png")
+	pending, _ := s.Key("pending.png")
+	// Model an unfinished loader: it must remain pinned even offscreen.
+	s.entries[pending] = &entry[*int]{done: make(chan struct{})}
+	s.UpdateViewport(map[string]float32{visible: 0})
+	if n, _ := s.Stats(); n != 63 || !s.Contains(visible) || !s.Contains(pending) {
+		t.Fatal("warm eviction boundary or pinned entry protection changed", n)
 	}
 }
