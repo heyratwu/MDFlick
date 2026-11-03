@@ -26,7 +26,9 @@
 
 ## 原生图片包边界
 
-`internal/svg` 负责 SVG 根 CSS 变量归一化、文字与静态 `foreignObject` 转路径，统一通过 `Normalize` 调用；转换输出上限为 16 MiB。它不依赖 MyGo，macOS 字形轮廓实现仍使用 Core Text / Core Graphics，其他平台保留不支持文字轮廓的错误行为。转换单测在该包内，MyGo 解析和实际绘制验证保留在原生适配层。
+文档中的所有 SVG 统一交给浏览器渲染，不按 SVG 特性分流。`internal/svg` 仅内嵌受信任的栅格化脚本；已删除原生文字转路径、Core Text 字形桥接和 CSS 变量改写。字体、布局、CSS 变量与滤镜均采用浏览器 SVG image 模式的规则。
+
+`svgImageRenderer` 显式注入图片加载器，后台任务复用 Mermaid 的应用级双 worker / WebView 池、队列、取消销毁与 30 秒空闲回收机制。SVG 输入以 base64 data URL 传给 `Image`，不插入页面 DOM；浏览器的 SVG image 模式禁止脚本和外部资源，保留 HTML/CSS、内嵌 data 图片和透明背景。画布按最多 2 倍分辨率输出，最大边 8192、总像素最多 1600 万；原始尺寸本身超过上限时拒绝。渲染队列与执行共享 15 秒期限，结果在 RGBA 解码前预留像素和压缩 PNG 缓存预算，显示仍使用 SVG 原有逻辑尺寸。渲染失败或未配置浏览器适配器时报告图片失败，不回退到另一套解析器。浏览器带来启动及内存开销，结果在图片缓存内复用；生成位图在大幅放大时不具备无限矢量精度。应用内置 UI 图标继续由框架管理。
 
 `internal/imagecache.Store[T]` 负责地址归一化、并发去重、文档与应用预算、离屏回收、取消和失败重试；仅依赖标准库。构造时注入 `Loader[T]`，加载器在分配保留资源前调用 `reserve`，失败或取消时由缓存归还预留预算。地址准入策略通过 `Config.AllowSource` 注入，原生应用继续使用 `document.NativePolicy().AllowsImage`。
 

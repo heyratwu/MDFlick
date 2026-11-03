@@ -12,8 +12,7 @@
 | 图片属性 | `src`、`alt`、`title`、数值 `width`/`height`、百分比 `width`；只指定一个尺寸时按原比例计算另一个，窄窗口按可用宽度缩小 |
 | 主题图片 | `<picture>` 内匹配 `prefers-color-scheme: dark/light` 的 `<source srcset>`；主题变化重新选择来源；没有对应来源时使用 `<img src>` |
 | `srcset` | 使用第一个候选地址；不根据屏幕密度、视口断点或 `sizes` 选择候选；`img` 没有 `src` 时可使用其 `srcset` |
-| SVG 图片颜色 | 外部 SVG 中简单的根级 CSS 颜色变量与回退值；浅色黑/深色白的变量映射到原生主题文字色，避免徽章透明；其余颜色使用浅色定义 |
-| SVG 图片文字（macOS） | 普通 `text`/`tspan` 与 `foreignObject` 中静态 `div`/`span` 等文字使用 Core Text 排版并转换成矢量路径；支持基本字体、字号、粗斜体、颜色、字距、对齐、换行及区域裁剪 |
+| SVG 图片 | 全部通过共享浏览器池按 SVG image 规则渲染，支持 CSS 变量、文字、`foreignObject` 布局、内嵌 data 图片和滤镜；生成最多双倍分辨率的透明位图，保持原始显示尺寸；不执行脚本或请求外部子资源 |
 | 列表 | `ul`、`ol`、`li`；保留有序列表的 `start`，支持嵌套列表和列表项内段落 |
 | 表格 | `table`、`thead`、`tbody`、`tr`、`th`、`td` 映射为原生 Markdown 表格；第一行作为表头 |
 | 引用 | `blockquote`，包括其中的段落和行内格式 |

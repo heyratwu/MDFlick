@@ -56,3 +56,5 @@ Quick Look DOM 优化另有回归测试，检查删除危险子树后相邻节�
 Quick Look 的直接输出与原 parser → HTML → DOM → sanitizer 路径比较浏览器 DOM，覆盖嵌套列表、任务列表、表格对齐、代码转义、图片替代文字、链接、重复标题、数学和脚注；另测两条路径的选择、分阶段取消、写入中取消、精确字节预算和图表数量上限。包含原始 HTML 的文档继续使用现有危险元素/属性过滤测试。
 
 本次原生冒烟运行实际生成了图表位图；在当前构建的 .app 中检查了中文流程图、滚动后的时序图、无效语法源码回退与重新载入。没有安装或重新注册 Finder 扩展；Finder 的实际切换和 Quick Look WebKit 视觉表现仍需发布前验证。
+
+SVG 文档图片统一使用浏览器渲染。`bash scripts/test-svg-browser.sh` 在 macOS WebKit 中离线验证 GitCode、Discord、Trendshift 徽章和基本形状：HTML/CSS 排版、嵌入图标、CSS 变量、透明背景、逻辑尺寸与双倍像素，并验证 SVG image 模式不执行脚本。Go 测试覆盖所有 SVG 的统一分派、缓存复用、预算拒绝、取消和原生 Markdown 布局；不再以原生 SVG 解析器代替真实浏览器绘图测试。

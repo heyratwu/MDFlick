@@ -95,6 +95,11 @@ func (r *diagramWebRuntime) close()      { r.cancel(); r.off(); r.web.Destroy() 
 func (r *diagramWebRuntime) alive() bool { return !r.web.IsDestroyed() }
 
 func (r *diagramWebRuntime) render(ctx context.Context, key diagramKey) diagramResult {
+	args, _ := json.Marshal([]any{key.code, key.dark})
+	return r.renderImage(ctx, "window.mdflickPNG(..."+string(args)+")", nil)
+}
+
+func (r *diagramWebRuntime) renderImage(ctx context.Context, expression string, reserve func(int64) error) diagramResult {
 	if err := ctx.Err(); err != nil {
 		return diagramResult{err: err}
 	}
@@ -105,15 +110,15 @@ func (r *diagramWebRuntime) render(ctx context.Context, key diagramKey) diagramR
 	case <-ctx.Done():
 		return diagramResult{err: ctx.Err()}
 	}
-	args, _ := json.Marshal([]any{key.code, key.dark})
-	value, err := r.web.Page().EvalContext(ctx, "window.mdflickPNG(..."+string(args)+")")
+	value, err := r.web.Page().EvalContext(ctx, expression)
 	if err != nil {
 		return diagramResult{err: err}
 	}
 	data, _ := json.Marshal(value)
 	var result struct {
-		PNG   string  `json:"png"`
-		Width float32 `json:"width"`
+		PNG    string  `json:"png"`
+		Width  float32 `json:"width"`
+		Height float32 `json:"height"`
 	}
 	if err = json.Unmarshal(data, &result); err != nil {
 		return diagramResult{err: err}
@@ -130,7 +135,18 @@ func (r *diagramWebRuntime) render(ctx context.Context, key diagramKey) diagramR
 	if pixels <= 0 || pixels > maxImagePixels {
 		return diagramResult{err: errors.New("图表尺寸过大")}
 	}
-	bitmap, err := ui.DecodeImage(png)
+	if reserve != nil {
+		if result.Width <= 0 || result.Height <= 0 || result.Width > 8192 || result.Height > 8192 {
+			return diagramResult{err: errors.New("SVG 图片尺寸无效")}
+		}
+		if err := reserve(pixels*4 + int64(len(png))); err != nil {
+			return diagramResult{err: err}
+		}
+	}
+	bitmap, err := ui.DecodeBitmap(png)
+	if reserve != nil && err == nil {
+		bitmap.SetLogicalSize(result.Width, result.Height)
+	}
 	return diagramResult{image: bitmap, width: result.Width, height: float32(config.Height) * result.Width / float32(config.Width), err: err, bytes: pixels * 4}
 }
 

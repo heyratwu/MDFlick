@@ -122,11 +122,25 @@ func TestRemoteImages(t *testing.T) {
 			t.Fatalf("unexpected bitmap size %dx%d", w, h)
 		}
 	}
-	if src, err := a.md.LoadImage(server.URL + "/badge"); err != nil {
+	// Exercise extensionless SVG MIME dispatch with an injected browser adapter;
+	// actual rendering pixels are covered by test-svg-browser.sh.
+	store := newImageStore(context.Background(), "/tmp/doc.md", imageTestResources(1<<20, 2),
+		func(ctx context.Context, data []byte, reserve func(int64) error) (ui.ImageSource, error) {
+			if !strings.Contains(string(data), `width="12" height="8"`) {
+				t.Fatal("SVG source lost")
+			}
+			if err := reserve(12 * 8 * 4); err != nil {
+				return nil, err
+			}
+			return ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 12, 8))), nil
+		})
+	defer store.Close()
+	if src, err := store.Load(server.URL + "/badge"); err != nil {
 		t.Fatal(err)
-	} else if _, ok := src.(*ui.SVG); !ok {
-		t.Fatalf("expected SVG, got %T", src)
+	} else if w, h := ui.ImageSize(src); w != 12 || h != 8 {
+		t.Fatalf("unexpected SVG image dimensions %v×%v", w, h)
 	}
+
 	for _, path := range []string{"/missing", "/large", "/large-stream", "/large-pixels", "/html", "/loop", "/file-redirect"} {
 		t.Run(path, func(t *testing.T) {
 			if _, err := a.md.LoadImage(server.URL + path); err == nil {

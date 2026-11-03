@@ -103,14 +103,7 @@ func (st *viewState) imageContent(c *ui.Context, n *parser.Inline, alt string, s
 		return
 	}
 	img := ui.Image(c, src).Radius(th.em(0.3)).MaxWidthPercent(100).Label(alt)
-	var w, h float32
-	switch s := src.(type) {
-	case *ui.Bitmap:
-		iw, ih := s.Size()
-		w, h = float32(iw), float32(ih)
-	case *ui.SVG:
-		w, h = s.Size()
-	}
+	w, h := ui.ImageSize(src)
 	if w > 0 && h > 0 {
 		img.AspectRatio(w / h)
 	}

@@ -18,8 +18,9 @@ import (
 // Bitmap is an image to show with Image. Create it once: converting an
 // image is not free.
 type Bitmap struct {
-	img  *scene.Image
-	w, h int
+	img                *scene.Image
+	w, h               int
+	logicalW, logicalH float32
 	// levels are the bitmap halved again and again, made as it shows
 	// smaller, for drawing it smoothly: levels[k] is 2^(k+1) times
 	// smaller.
@@ -121,7 +122,7 @@ func (b *Bitmap) Update(img image.Image) {
 	b.fresh = 0
 }
 
-// Size returns the bitmap's size in pixels, which Image shows as DIPs.
+// Size returns the bitmap's size in pixels. ImageSize returns its display size.
 func (b *Bitmap) Size() (w, h int) { return b.w, b.h }
 
 // ReleasePixels drops the CPU pixels of a bitmap DecodeBitmap made,
@@ -175,9 +176,20 @@ func (b *Bitmap) levelPix(i int) func() []byte {
 	}
 }
 
+// SetLogicalSize sets the default display size in DIPs without changing pixels.
+// Call before publishing the bitmap to the UI thread.
+func (b *Bitmap) SetLogicalSize(w, h float32) {
+	if w > 0 && h > 0 && !math.IsInf(float64(w), 0) && !math.IsInf(float64(h), 0) {
+		b.logicalW, b.logicalH = w, h
+	}
+}
+
 func (b *Bitmap) imageSize() (float32, float32) {
 	if b == nil {
 		return 0, 0
+	}
+	if b.logicalW > 0 && b.logicalH > 0 {
+		return b.logicalW, b.logicalH
 	}
 	return float32(b.w), float32(b.h)
 }

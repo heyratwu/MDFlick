@@ -113,14 +113,7 @@ func (a *readerWindow) nativeHTMLImage(c *ui.Context, im readerNativeImage) {
 	if a.md.ResolveImage != nil {
 		src = a.md.ResolveImage(c, source, box)
 	}
-	var naturalW, naturalH float32
-	switch s := src.(type) {
-	case *ui.Bitmap:
-		w, h := s.Size()
-		naturalW, naturalH = float32(w), float32(h)
-	case *ui.SVG:
-		naturalW, naturalH = s.Size()
-	}
+	naturalW, naturalH := ui.ImageSize(src)
 	_, available, _ := readerWidths(c)
 	available = max(1, available-a.blockIndent)
 	width, height := nativeImageSize(metadata, naturalW, naturalH, available)

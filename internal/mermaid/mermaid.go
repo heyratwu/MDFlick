@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
+	"mdflick/internal/svg"
 	"sync"
 )
 
@@ -20,7 +21,7 @@ var runtime string
 func Scripts() (tags, policy string) { return bundledScripts() }
 
 var bundledScripts = sync.OnceValues(func() (tags, policy string) {
-	for _, script := range []string{library, runtime} {
+	for _, script := range []string{library, runtime, svg.RasterizerScript} {
 		sum := sha256.Sum256([]byte(script))
 		policy += " 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 		tags += "<script>" + script + "</script>"

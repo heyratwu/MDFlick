@@ -50,12 +50,8 @@ func (f *readerImageFrame) resolve(c *ui.Context, source string, box ui.Element)
 	anchor := &geometry.handle
 	box.Bind(anchor)
 	image, _ := s.Peek(key)
-	switch src := image.(type) {
-	case *ui.Bitmap:
-		w, h := src.Size()
-		geometry.width, geometry.height = float32(w), float32(h)
-	case *ui.SVG:
-		geometry.width, geometry.height = src.Size()
+	if image != nil {
+		geometry.width, geometry.height = ui.ImageSize(image)
 	}
 	if image == nil && geometry.width > 0 && geometry.height > 0 {
 		box.Width(geometry.width).AspectRatio(geometry.width / geometry.height)

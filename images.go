@@ -16,21 +16,22 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"mdflick/internal/imagecache"
-	"mdflick/internal/svg"
 )
+
+type svgImageRenderer func(context.Context, []byte, func(int64) error) (ui.ImageSource, error)
 
 const maxImageBytes = 16 << 20
 const maxImagePixels = 16_000_000
 
 // Loading and decoding share the store's cancellation and admission policy.
-func loadDocumentImage(ctx context.Context, dir, source string, reserve func(int64) error) (ui.ImageSource, error) {
+func loadDocumentImage(ctx context.Context, dir, source string, reserve func(int64) error, renderers ...svgImageRenderer) (ui.ImageSource, error) {
 	if strings.Contains(source, "://") {
 		address, err := url.Parse(source)
 		if err != nil {
 			return nil, err
 		}
 		if address.Scheme == "http" || address.Scheme == "https" {
-			return remoteImage(ctx, address.String(), reserve)
+			return remoteImage(ctx, address.String(), reserve, renderers...)
 		}
 		return nil, os.ErrNotExist
 	}
@@ -58,7 +59,7 @@ func loadDocumentImage(ctx context.Context, dir, source string, reserve func(int
 	if err != nil {
 		return nil, err
 	}
-	return decodeImage(ctx, data, strings.EqualFold(filepath.Ext(path), ".svg"), reserve)
+	return decodeImage(ctx, data, strings.EqualFold(filepath.Ext(path), ".svg"), reserve, renderers...)
 }
 
 var errImageTemporary = imagecache.ErrTemporary
@@ -78,7 +79,7 @@ var imageHTTPClient = &http.Client{
 	},
 }
 
-func remoteImage(ctx context.Context, address string, reserve func(int64) error) (ui.ImageSource, error) {
+func remoteImage(ctx context.Context, address string, reserve func(int64) error, renderers ...svgImageRenderer) (ui.ImageSource, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, err
@@ -103,23 +104,18 @@ func remoteImage(ctx context.Context, address string, reserve func(int64) error)
 	}
 	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	isSVG := contentType == "image/svg+xml" || strings.EqualFold(filepath.Ext(resp.Request.URL.Path), ".svg")
-	return decodeImage(ctx, data, isSVG, reserve)
+	return decodeImage(ctx, data, isSVG, reserve, renderers...)
 }
 
-func decodeImage(ctx context.Context, data []byte, isSVG bool, reserve func(int64) error) (ui.ImageSource, error) {
+func decodeImage(ctx context.Context, data []byte, isSVG bool, reserve func(int64) error, renderers ...svgImageRenderer) (ui.ImageSource, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if isSVG {
-		normalized, err := svg.Normalize(ctx, data)
-		if err != nil {
-			return nil, err
+		if len(renderers) == 0 || renderers[0] == nil {
+			return nil, fmt.Errorf("SVG 浏览器渲染器不可用")
 		}
-		// SVG structures vary: charge a conservative source-based estimate.
-		if err := reserve(int64(max(len(data), len(normalized)))*8 + 4096); err != nil {
-			return nil, err
-		}
-		return ui.ParseSVG(normalized)
+		return renderers[0](ctx, data, reserve)
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {

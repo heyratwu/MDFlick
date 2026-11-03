@@ -19,6 +19,7 @@ type pooledDiagramJob struct {
 	start  func() bool
 	ctx    context.Context
 	key    diagramKey
+	run    func(context.Context, diagramRuntime) diagramResult
 	create func() (diagramRuntime, error)
 	result chan diagramResult
 }
@@ -47,6 +48,12 @@ func (p *diagramPool) render(ctx context.Context, key diagramKey, create func() 
 }
 
 func (p *diagramPool) renderWithStart(ctx context.Context, key diagramKey, create func() (diagramRuntime, error), start func() bool) diagramResult {
+	return p.execute(pooledDiagramJob{ctx: ctx, key: key, create: create, start: start})
+}
+
+// execute shares the same bounded workers and runtime lifetime for diagrams and SVGs.
+func (p *diagramPool) execute(job pooledDiagramJob) diagramResult {
+	ctx := job.ctx
 	if err := ctx.Err(); err != nil {
 		return diagramResult{err: err}
 	}
@@ -58,7 +65,7 @@ func (p *diagramPool) renderWithStart(ctx context.Context, key diagramKey, creat
 			go p.work()
 		}
 	})
-	job := pooledDiagramJob{ctx: ctx, key: key, create: create, result: make(chan diagramResult, 1), start: start}
+	job.result = make(chan diagramResult, 1)
 	select {
 	case p.jobs <- job:
 	case <-ctx.Done():
@@ -125,7 +132,7 @@ func (p *diagramPool) work() {
 						result.err = acquireWork(ctx, p.slots)
 					}
 					if result.err == nil {
-						result = runtime.render(ctx, job.key)
+						result = job.render(ctx, runtime)
 						if p.slots != nil {
 							<-p.slots
 						}
@@ -135,7 +142,7 @@ func (p *diagramPool) work() {
 							release()
 							runtime, result.err = job.create()
 							if result.err == nil {
-								result = runtime.render(ctx, job.key)
+								result = job.render(ctx, runtime)
 							}
 						}
 					}
@@ -153,4 +160,11 @@ func (p *diagramPool) work() {
 			timer.Reset(p.idle)
 		}
 	}
+}
+
+func (job pooledDiagramJob) render(ctx context.Context, runtime diagramRuntime) diagramResult {
+	if job.run != nil {
+		return job.run(ctx, runtime)
+	}
+	return runtime.render(ctx, job.key)
 }

@@ -203,7 +203,14 @@ func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
 	if a.resources == nil {
 		a.resources = newApplicationResources()
 	}
-	a.images = newImageStore(ctx, path, a.resources.images)
+	var renderSVG svgImageRenderer
+	if a.win != nil {
+		if a.resources.diagramPool == nil {
+			a.resources.diagramPool = newDiagramPool(a.resources.diagrams)
+		}
+		renderSVG = newSVGImageRenderer(a.win, a.resources.diagramPool)
+	}
+	a.images = newImageStore(ctx, path, a.resources.images, renderSVG)
 	a.imageScheduler = newImageScheduler(a.images)
 	a.md = &markdown.Options{
 		Code:      map[string]func(*ui.Context, *markdown.CodeBlockView){"mermaid": a.mermaidBlock},
