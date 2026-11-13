@@ -1,11 +1,13 @@
 package main
 
 import (
-	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 	"log"
 	"path/filepath"
 	"time"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+	"mdflick/internal/document"
 )
 
 type application struct {
@@ -64,6 +66,15 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 		// center them in the 40-point title bar, including after a resize.
 		TrafficLightPosition: &mygo.Point{X: 12, Y: (readerTitleBarHeight - 14) / 2},
 		Content:              ui.View(a.view),
+	})
+	a.win.OnFileDrop(func(e *mygo.FileDropEvent) {
+		a.win.Update(func() {
+			for _, path := range e.Paths {
+				if document.IsMarkdownPath(path) {
+					manager.openPath(path, a)
+				}
+			}
+		})
 	})
 	a.openDocument = func(path string) {
 		a.win.Update(func() { manager.openPath(path, a) })

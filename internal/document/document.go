@@ -40,7 +40,7 @@ func LoadContext(ctx context.Context, path string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if !isMarkdownPath(path) {
+	if !IsMarkdownPath(path) {
 		return "", UnsupportedExtension
 	}
 	f, err := os.Open(path)
@@ -58,7 +58,8 @@ func LoadContext(ctx context.Context, path string) (string, error) {
 	return Read(contextReader{ctx, f})
 }
 
-func isMarkdownPath(path string) bool {
+// IsMarkdownPath reports whether path has a supported Markdown extension.
+func IsMarkdownPath(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".md", ".markdown":
 		return true

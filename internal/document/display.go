@@ -96,7 +96,7 @@ func LocalDocumentPath(dest string) string {
 			return ""
 		}
 	}
-	if isMarkdownPath(path) {
+	if IsMarkdownPath(path) {
 		return path
 	}
 	return ""

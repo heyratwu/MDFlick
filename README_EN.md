@@ -4,6 +4,7 @@ A read-only Markdown viewer built with MyGo, supporting macOS 12 and later and W
 
 - Double-click `.md` or `.markdown` files to open them, with each file displayed in its own window.
 - When launched from the app icon, the home screen shows an “Open File” button in the center. The first selected file opens directly in the current window.
+- Drop `.md` or `.markdown` files onto a window to open them. The first file uses the welcome window if that's where you drop it. Each additional file, or any file dropped onto an open document, opens in its own window.
 - Closing the last window quits the app. Opening a file by double-clicking reuses an existing home window instead of keeping an extra default window open.
 - Use `⌘O` to open a file and `⌘R` to reload it. The system's “Open Recent” menu is supported.
 - Open Markdown files automatically reload and rerender when modified by other software, including editors that use atomic saves. The current preview and scroll position are preserved during refresh, and unchanged content skips redundant rendering. Rapid successive writes are coalesced into a single refresh.
