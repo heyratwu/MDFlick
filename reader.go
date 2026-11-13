@@ -27,6 +27,7 @@ type readerWindow struct {
 	scroll         ui.ScrollState
 	html           readerHTMLState
 	open           func()
+	openDocument   func(string)
 	performance    readerPerformance
 	openStarted    time.Time
 	watchCancel    context.CancelFunc
@@ -67,6 +68,7 @@ func (a *readerWindow) view(c *ui.Context) {
 			a.md.BlockStyle = a.readerBlockStyle
 			a.md.Block = a.nativeHTMLBlock
 			a.md.OnLink = a.linkHandler(c)
+			a.md.LinkIcon = localDocumentIcon
 			finishDiagrams := a.beginDiagramFrame(c)
 			defer finishDiagrams()
 			finishImages := a.beginImageFrame(c)

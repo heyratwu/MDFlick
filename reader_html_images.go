@@ -161,7 +161,16 @@ func (a *readerWindow) nativeHTMLImage(c *ui.Context, im readerNativeImage) {
 				if handler != nil {
 					handler(dest)
 				}
-			}).Children(draw)
+			}).Children(func() {
+				if icon, ok := localDocumentIcon(dest, a.md.Theme.FontSize, a.md.Theme.Link); ok {
+					ui.Row(c).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Size(icon.Width, icon.Height+icon.Depth).Shrink(0).Draw(icon.Draw)
+						draw()
+					})
+					return
+				}
+				draw()
+			})
 		} else {
 			draw()
 		}

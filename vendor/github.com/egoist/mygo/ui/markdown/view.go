@@ -27,6 +27,9 @@ type Options struct {
 	// router around the view, a link to #a-heading scrolls to that
 	// heading, and links of other schemes do nothing.
 	OnLink func(url string)
+	// LinkIcon adds a decorative inline object before the label of a link.
+	// It takes the surrounding text size and link color, and is omitted when copying.
+	LinkIcon func(url string, size float32, color ui.Color) (InlineObject, bool)
 	// LoadImage loads the image at url, on a goroutine of its own, for the
 	// views to show; until it has, they show its description. Without
 	// it, images show as their descriptions. FileImages loads files.
@@ -78,7 +81,7 @@ type Options struct {
 	images sync.Map // url → *imageEntry
 }
 
-// InlineObject is math within text, as Options.InlineMath makes it: a
+// InlineObject is an object within text, as Options.InlineMath or LinkIcon makes it: a
 // box Width wide, Height above the baseline and Depth below it, in DIPs,
 // which Draw paints in r, its box in the window. Draw only paints: it
 // may run more than once a frame.
@@ -425,6 +428,7 @@ func (st *viewState) para(i int, base spanStyle) *para {
 	sb.fade = st.fade
 	sb.notes = st.noteNumber
 	sb.math = st.o.InlineMath
+	sb.linkIcon = st.o.LinkIcon
 	sb.build(&pc.p, base)
 	return &pc.p
 }
@@ -452,7 +456,7 @@ func (st *viewState) paragraph(c *ui.Context, i int, base spanStyle) ui.Element 
 	}
 	if objects := p.objects; len(objects) > 0 {
 		el.DrawObjects(func(pa *ui.Painter, at int, r ui.Rect) {
-			if k, ok := slices.BinarySearchFunc(objects, at, func(o mathObject, at int) int { return o.rune - at }); ok && objects[k].draw != nil {
+			if k, ok := slices.BinarySearchFunc(objects, at, func(o paragraphObject, at int) int { return o.rune - at }); ok && objects[k].draw != nil {
 				objects[k].draw(pa, r)
 			}
 		})

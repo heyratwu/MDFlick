@@ -2,8 +2,9 @@
 
 当前仍锁定 `github.com/egoist/mygo v0.7.3`。使用 Go 标准 `vendor/`，仅修改以下框架文件：
 
-- `ui/markdown/view.go`：`ViewDocument` 接收预解析文档；`Options.BlockStyle` 配置原始块容器；`Options.ResolveImage` 允许应用直接查询图片缓存，绕过框架默认的逐地址 goroutine 和缓存。
+- `ui/markdown/view.go`：`ViewDocument` 接收预解析文档；`Options.BlockStyle` 配置原始块容器；`Options.ResolveImage` 允许应用直接查询图片缓存，绕过框架默认的逐地址 goroutine 和缓存；`Options.LinkIcon` 在链接文字前绘制可点击的行内图标。
 - `ui/bitmap.go`：`Bitmap.SetLogicalSize` 将默认显示尺寸与实际像素尺寸分离，用于浏览器生成的高清 SVG 位图；`Size` 仍返回像素尺寸，`ImageSize` 返回显示尺寸。
+- `ui/markdown/spans.go` 和 `ui/markdown/copy.go`：链接图标参与段落和表格排版，复制时略去图标。
 - `ui/markdown/image.go`：可选图片解析回调接收当前图片容器，应用只绑定持久 Handle，不保留元素；未设置回调时保留框架默认行为；图片比例通过 `ui.ImageSize` 读取，尊重高清位图的逻辑尺寸。
 - `ui/presentation.go`、`ui/runtime.go`、`ui/context.go`：`Context.AfterPresent` 在最终构建 pass 的帧提交到 surface 后执行一次回调。窗口尚未实际提交时不报告；回调不在绘制函数内执行。
 

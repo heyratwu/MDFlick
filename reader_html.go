@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -53,6 +55,18 @@ func (a *readerWindow) linkHandler(c *ui.Context) func(string) {
 			a.html.scrollTo = strings.ToLower(name)
 		case document.OpenExternal:
 			services.OpenURL(dest)
+		case document.OpenLocalDocument:
+			if a.openDocument != nil {
+				path := document.LocalDocumentPath(dest)
+				switch {
+				case filepath.IsAbs(path):
+				case os.IsPathSeparator(path[0]):
+					path = filepath.VolumeName(a.path) + path
+				default:
+					path = filepath.Join(filepath.Dir(a.path), path)
+				}
+				a.openDocument(path)
+			}
 		}
 	}
 }

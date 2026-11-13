@@ -40,9 +40,7 @@ func LoadContext(ctx context.Context, path string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".md", ".markdown":
-	default:
+	if !isMarkdownPath(path) {
 		return "", UnsupportedExtension
 	}
 	f, err := os.Open(path)
@@ -58,6 +56,14 @@ func LoadContext(ctx context.Context, path string) (string, error) {
 		return "", NotRegular
 	}
 	return Read(contextReader{ctx, f})
+}
+
+func isMarkdownPath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".markdown":
+		return true
+	}
+	return false
 }
 
 type contextReader struct {

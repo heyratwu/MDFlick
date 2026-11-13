@@ -65,6 +65,9 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 		TrafficLightPosition: &mygo.Point{X: 12, Y: (readerTitleBarHeight - 14) / 2},
 		Content:              ui.View(a.view),
 	})
+	a.openDocument = func(path string) {
+		a.win.Update(func() { manager.openPath(path, a) })
+	}
 	manager.windows[path] = a
 	a.win.OnClosed(func() {
 		a.close()

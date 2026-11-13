@@ -2,6 +2,8 @@ package document
 
 import (
 	"net/url"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"unicode"
 )
@@ -12,6 +14,7 @@ const (
 	IgnoreLink LinkAction = iota
 	ScrollToAnchor
 	OpenExternal
+	OpenLocalDocument
 )
 
 // DisplayPolicy describes adapter capabilities, independent of UI/WebKit APIs.
@@ -19,15 +22,19 @@ const (
 type DisplayPolicy struct {
 	LocalImages, RemoteImages bool
 	ExternalLinks             bool
+	LocalDocuments            bool
 	Mermaid                   bool
 }
 
 func NativePolicy() DisplayPolicy {
-	return DisplayPolicy{LocalImages: true, RemoteImages: true, ExternalLinks: true, Mermaid: true}
+	return DisplayPolicy{LocalImages: true, RemoteImages: true, ExternalLinks: true, LocalDocuments: true, Mermaid: true}
 }
 func QuickLookPolicy() DisplayPolicy { return DisplayPolicy{Mermaid: true} }
 
 func (p DisplayPolicy) Link(dest string) LinkAction {
+	if p.LocalDocuments && LocalDocumentPath(dest) != "" {
+		return OpenLocalDocument
+	}
 	if strings.ContainsAny(dest, "\\\x00\r\n") || strings.HasPrefix(dest, "//") {
 		return IgnoreLink
 	}
@@ -52,6 +59,47 @@ func (p DisplayPolicy) Link(dest string) LinkAction {
 		}
 	}
 	return IgnoreLink
+}
+
+// LocalDocumentPath returns the filesystem path in a Markdown link, if any.
+// URL query strings and fragments are separate from the file name.
+func LocalDocumentPath(dest string) string {
+	if runtime.GOOS == "windows" {
+		dest = strings.ReplaceAll(dest, "\\", "/")
+		if !strings.HasPrefix(dest, "/") && filepath.IsAbs(dest) {
+			dest = "/" + dest // Parse a drive letter as part of the path.
+		}
+	}
+	if strings.HasPrefix(dest, "//") || strings.ContainsAny(dest, "\\\x00\r\n") {
+		return ""
+	}
+	u, err := url.Parse(dest)
+	if err != nil || strings.HasPrefix(u.Path, "//") || strings.ContainsAny(u.Path, "\\\x00\r\n") {
+		return ""
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "":
+	case "file":
+		if (u.Host != "" && !strings.EqualFold(u.Host, "localhost")) || u.User != nil || !strings.HasPrefix(u.Path, "/") {
+			return ""
+		}
+	default:
+		return ""
+	}
+	path := filepath.FromSlash(u.Path)
+	if runtime.GOOS == "windows" {
+		if strings.HasPrefix(u.Path, "/") && filepath.IsAbs(path[1:]) {
+			path = path[1:]
+		}
+		volume := filepath.VolumeName(path)
+		if (volume != "" && !filepath.IsAbs(path)) || strings.ContainsRune(path[len(volume):], ':') {
+			return ""
+		}
+	}
+	if isMarkdownPath(path) {
+		return path
+	}
+	return ""
 }
 
 func (p DisplayPolicy) AllowsImage(source string) bool {

@@ -61,7 +61,14 @@
 +}
 --- a/vendor/github.com/egoist/mygo/ui/markdown/view.go
 +++ b/vendor/github.com/egoist/mygo/ui/markdown/view.go
-@@ -31,6 +31,10 @@
+@@ -27,10 +27,17 @@
+ 	// router around the view, a link to #a-heading scrolls to that
+ 	// heading, and links of other schemes do nothing.
+ 	OnLink func(url string)
++	// LinkIcon adds a decorative inline object before the label of a link.
++	// It takes the surrounding text size and link color, and is omitted when copying.
++	LinkIcon func(url string, size float32, color ui.Color) (InlineObject, bool)
+ 	// LoadImage loads the image at url, on a goroutine of its own, for the
  	// views to show; until it has, they show its description. Without
  	// it, images show as their descriptions. FileImages loads files.
  	LoadImage func(url string) (ui.ImageSource, error)
@@ -72,7 +79,7 @@
  
  	// CodeBlock, when set, builds code blocks in place of DefaultCodeBlock,
  	// which it can call to wrap it; Code builds the code blocks of the
-@@ -40,6 +44,8 @@
+@@ -40,6 +47,8 @@
  	// WrapCode wraps the lines of code blocks rather than scrolling them
  	// sideways.
  	WrapCode bool
@@ -81,7 +88,7 @@
  	// Math, when set, builds blocks of display math from their TeX, which
  	// show as their TeX without it; math within text shows as its TeX.
  	Math func(c *ui.Context, tex string)
-@@ -58,6 +64,9 @@
+@@ -58,6 +67,9 @@
  	// Block, when set, is asked first for each block, and builds it in
  	// its place when it returns true.
  	Block func(c *ui.Context, d *parser.Document, i int) bool
@@ -91,14 +98,23 @@
  
  	// Reveal is how Stream shows text as it comes: DefaultReveal when nil.
  	Reveal *Reveal
-@@ -88,7 +97,18 @@
+@@ -69,7 +81,7 @@
+ 	images sync.Map // url → *imageEntry
+ }
+ 
+-// InlineObject is math within text, as Options.InlineMath makes it: a
++// InlineObject is an object within text, as Options.InlineMath or LinkIcon makes it: a
+ // box Width wide, Height above the baseline and Depth below it, in DIPs,
+ // which Draw paints in r, its box in the window. Draw only paints: it
+ // may run more than once a frame.
+@@ -88,9 +100,20 @@
  //
  //	markdown.View(c, app.readme, &app.md)
  func View(c *ui.Context, src string, o *Options) ui.Element {
 -	return build(c, src, o, false)
 +	return build(c, src, o, false, nil)
-+}
-+
+ }
+ 
 +// ViewDocument adopts a finished parse, exclusively owned by this view on the
 +// UI thread after publication. It must not be shared with another view or worker:
 +// inline parsing is lazy and mutates Document. Do not edit it while mounted.
@@ -108,10 +124,12 @@
 +		return View(c, "", o)
 +	}
 +	return build(c, d.Source(), o, false, d)
- }
- 
++}
++
  // Stream shows src, Markdown still being written, as a language model's
-@@ -105,7 +125,7 @@
+ // reply: text appended to src since the last frame is parsed alone, the
+ // end shows what its half-written syntax will most likely become (see
+@@ -105,7 +128,7 @@
  //		markdown.Stream(c, msg.text, &app.md)
  //	}
  func Stream(c *ui.Context, src string, o *Options) ui.Element {
@@ -120,7 +138,7 @@
  }
  
  // stateKey keys a view's state among its root's.
-@@ -150,7 +170,7 @@
+@@ -150,7 +173,7 @@
  
  func newState() *viewState { return &viewState{scrollTo: -1} }
  
@@ -129,7 +147,7 @@
  	if o == nil {
  		o = &defaultOptions
  	}
-@@ -158,8 +178,16 @@
+@@ -158,9 +181,17 @@
  	st := *ui.Local(root, stateKey{}, newState)
  	st.o = o
  	ext := o.Extensions
@@ -138,15 +156,16 @@
 +	}
  	if ext == 0 {
  		ext = parser.Default
-+	}
+ 	}
 +	if prepared != nil && st.doc != prepared {
 +		st.forget()
 +		st.doc, st.ext = prepared, ext
 +		st.paras = nil
- 	}
++	}
  	if st.doc == nil || st.ext != ext {
  		st.doc, st.ext = parser.New(ext), ext
-@@ -286,10 +314,15 @@
+ 		st.paras = st.paras[:0]
+@@ -286,10 +317,15 @@
  	o := st.o
  	th := &st.th
  	b := d.Block(i)
@@ -164,6 +183,23 @@
  		if done {
  			return box
  		}
+@@ -392,6 +428,7 @@
+ 	sb.fade = st.fade
+ 	sb.notes = st.noteNumber
+ 	sb.math = st.o.InlineMath
++	sb.linkIcon = st.o.LinkIcon
+ 	sb.build(&pc.p, base)
+ 	return &pc.p
+ }
+@@ -419,7 +456,7 @@
+ 	}
+ 	if objects := p.objects; len(objects) > 0 {
+ 		el.DrawObjects(func(pa *ui.Painter, at int, r ui.Rect) {
+-			if k, ok := slices.BinarySearchFunc(objects, at, func(o mathObject, at int) int { return o.rune - at }); ok && objects[k].draw != nil {
++			if k, ok := slices.BinarySearchFunc(objects, at, func(o paragraphObject, at int) int { return o.rune - at }); ok && objects[k].draw != nil {
+ 				objects[k].draw(pa, r)
+ 			}
+ 		})
 --- a/vendor/github.com/egoist/mygo/ui/markdown/image.go
 +++ b/vendor/github.com/egoist/mygo/ui/markdown/image.go
 @@ -79,32 +79,35 @@
@@ -333,3 +369,102 @@
  	}
  	return float32(b.w), float32(b.h)
  }
+--- a/vendor/github.com/egoist/mygo/ui/markdown/spans.go
++++ b/vendor/github.com/egoist/mygo/ui/markdown/spans.go
+@@ -27,10 +27,8 @@
+ 	exact          bool
+ }
+ 
+-// mathObject is math within a paragraph that Options.InlineMath made an
+-// object of: its rune, the source of the math, delimiters included, and
+-// how it draws.
+-type mathObject struct {
++// paragraphObject records how an inline object draws and maps to source.
++type paragraphObject struct {
+ 	rune, src, end int
+ 	draw           func(p *ui.Painter, r ui.Rect)
+ }
+@@ -39,9 +37,9 @@
+ type para struct {
+ 	pieces []piece
+ 	marks  []runMark
+-	// objects are its math drawn by the app, in order: a slice of each
++	// objects are its inline objects drawn by the app, in order: a slice of each
+ 	// build's own, which the view's drawing keeps.
+-	objects []mathObject
++	objects []paragraphObject
+ 	runes   int
+ 	fading  bool // its spans fade in: build them anew next frame
+ 	// width is the width of its text on one line, once measured.
+@@ -79,7 +77,8 @@
+ 	// linkIndex is the inline of the link being built.
+ 	linkIndex int
+ 	// math makes math within text objects (Options.InlineMath).
+-	math func(tex string, size float32) (InlineObject, bool)
++	math     func(tex string, size float32) (InlineObject, bool)
++	linkIcon func(url string, size float32, color ui.Color) (InlineObject, bool)
+ }
+ 
+ // build makes the paragraph of block i, of base style s.
+@@ -297,6 +296,15 @@
+ 			cs.color = Color{} // the link's
+ 			save := sb.linkIndex
+ 			sb.linkIndex = k
++			if sb.linkIcon != nil && !n.Pending {
++				size := cs.size
++				if size == 0 {
++					size = sb.th.FontSize
++				}
++				if icon, ok := sb.linkIcon(n.Dest, size, sb.th.Link); ok && icon.Width > 0 {
++					sb.addObject(icon, size, n.Start, n.Start, k)
++				}
++			}
+ 			sb.inlines(k+1, n.Next, cs)
+ 			sb.linkIndex = save
+ 		case parser.Image:
+@@ -358,17 +366,21 @@
+ 	if !ok || !(o.Width > 0) {
+ 		return false
+ 	}
++	sb.addObject(o, size, n.Start, n.End, link)
++	return true
++}
++
++func (sb *spanBuilder) addObject(o InlineObject, size float32, start, end, link int) {
+ 	p := sb.p
+-	p.objects = append(p.objects, mathObject{rune: p.runes, src: n.Start, end: n.End, draw: o.Draw})
++	p.objects = append(p.objects, paragraphObject{rune: p.runes, src: start, end: end, draw: o.Draw})
+ 	sp := ui.Span{Text: "\uFFFC", Size: size, ObjectWidth: o.Width, ObjectHeight: max(o.Height, 0), ObjectDescent: max(o.Depth, 0)}
+ 	if sb.fade != nil {
+-		sb.p.fading = sb.p.fading || sb.fade(n.Start) < 1
++		sb.p.fading = sb.p.fading || sb.fade(start) < 1
+ 	}
+ 	pc := sb.piece(link)
+ 	pc.spans = append(pc.spans, sp)
+-	p.marks = append(p.marks, runMark{rune: p.runes, src: n.Start, end: n.End})
++	p.marks = append(p.marks, runMark{rune: p.runes, src: start, end: end})
+ 	p.runes++
+-	return true
+ }
+ 
+ // codeStart returns where a code span's text starts in the source.
+--- a/vendor/github.com/egoist/mygo/ui/markdown/copy.go
++++ b/vendor/github.com/egoist/mygo/ui/markdown/copy.go
+@@ -50,7 +50,7 @@
+ }
+ 
+ // writeText writes the text of a selected part, with the source of the
+-// math drawn as objects, as $x_i$, in place of their characters.
++// inline objects in place of their characters. Icons have no source text.
+ func (st *viewState) writeText(b *strings.Builder, inf elemInfo, p ui.SelectedText) {
+ 	text := runeSlice(p.Text, p.Start, p.End)
+ 	if inf.line != -1 || inf.block >= len(st.paras) || !st.paras[inf.block].ok || len(st.paras[inf.block].p.objects) == 0 {
+@@ -61,7 +61,7 @@
+ 	src := st.doc.Source()
+ 	r := p.Start
+ 	for _, c := range text {
+-		k, found := slices.BinarySearchFunc(objects, r, func(o mathObject, r int) int { return o.rune - r })
++		k, found := slices.BinarySearchFunc(objects, r, func(o paragraphObject, r int) int { return o.rune - r })
+ 		if found && c == '\uFFFC' && objects[k].end <= len(src) {
+ 			b.WriteString(src[objects[k].src:objects[k].end])
+ 		} else {

@@ -19,22 +19,27 @@ func TestNativeAdapterLinkContract(t *testing.T) {
 			a.onLink = func(dest string) { visited = dest }
 			prepareTestReader(t, a)
 			tt := ui.NewTester(a.view, 1000, 900)
+			local := tc.Name == "relative-document"
 			for _, label := range []string{"OutsideLink", "AlignedLink", "TableLink"} {
 				visited = ""
+				text := label
+				if local {
+					text = "\uFFFC" + text
+				}
 				// Paragraph bounds span the prose column; click the glyphs
 				// instead of the empty center of a left-aligned paragraph.
 				if label == "AlignedLink" {
-					if err := tt.Click(label); err != nil {
+					if err := tt.Click(text); err != nil {
 						t.Fatal(err)
 					}
 				} else {
-					r, ok := tt.Find(label)
+					r, ok := tt.Find(text)
 					if !ok {
 						t.Fatal("missing link", label)
 					}
 					tt.ClickAt(r.X+2, r.Y+r.H/2)
 				}
-				if (visited != "") != (tc.NativeExternal || tc.Anchor) {
+				if (visited != "") != (tc.NativeExternal || tc.Anchor || local) {
 					t.Fatalf("%s routed to %q", label, visited)
 				}
 			}

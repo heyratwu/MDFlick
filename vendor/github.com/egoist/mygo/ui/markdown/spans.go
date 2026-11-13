@@ -27,10 +27,8 @@ type runMark struct {
 	exact          bool
 }
 
-// mathObject is math within a paragraph that Options.InlineMath made an
-// object of: its rune, the source of the math, delimiters included, and
-// how it draws.
-type mathObject struct {
+// paragraphObject records how an inline object draws and maps to source.
+type paragraphObject struct {
 	rune, src, end int
 	draw           func(p *ui.Painter, r ui.Rect)
 }
@@ -39,9 +37,9 @@ type mathObject struct {
 type para struct {
 	pieces []piece
 	marks  []runMark
-	// objects are its math drawn by the app, in order: a slice of each
+	// objects are its inline objects drawn by the app, in order: a slice of each
 	// build's own, which the view's drawing keeps.
-	objects []mathObject
+	objects []paragraphObject
 	runes   int
 	fading  bool // its spans fade in: build them anew next frame
 	// width is the width of its text on one line, once measured.
@@ -79,7 +77,8 @@ type spanBuilder struct {
 	// linkIndex is the inline of the link being built.
 	linkIndex int
 	// math makes math within text objects (Options.InlineMath).
-	math func(tex string, size float32) (InlineObject, bool)
+	math     func(tex string, size float32) (InlineObject, bool)
+	linkIcon func(url string, size float32, color ui.Color) (InlineObject, bool)
 }
 
 // build makes the paragraph of block i, of base style s.
@@ -297,6 +296,15 @@ func (sb *spanBuilder) inlines(from, to int, s spanStyle) {
 			cs.color = Color{} // the link's
 			save := sb.linkIndex
 			sb.linkIndex = k
+			if sb.linkIcon != nil && !n.Pending {
+				size := cs.size
+				if size == 0 {
+					size = sb.th.FontSize
+				}
+				if icon, ok := sb.linkIcon(n.Dest, size, sb.th.Link); ok && icon.Width > 0 {
+					sb.addObject(icon, size, n.Start, n.Start, k)
+				}
+			}
 			sb.inlines(k+1, n.Next, cs)
 			sb.linkIndex = save
 		case parser.Image:
@@ -358,17 +366,21 @@ func (sb *spanBuilder) mathObject(n *parser.Inline, s spanStyle, link int) bool 
 	if !ok || !(o.Width > 0) {
 		return false
 	}
+	sb.addObject(o, size, n.Start, n.End, link)
+	return true
+}
+
+func (sb *spanBuilder) addObject(o InlineObject, size float32, start, end, link int) {
 	p := sb.p
-	p.objects = append(p.objects, mathObject{rune: p.runes, src: n.Start, end: n.End, draw: o.Draw})
+	p.objects = append(p.objects, paragraphObject{rune: p.runes, src: start, end: end, draw: o.Draw})
 	sp := ui.Span{Text: "\uFFFC", Size: size, ObjectWidth: o.Width, ObjectHeight: max(o.Height, 0), ObjectDescent: max(o.Depth, 0)}
 	if sb.fade != nil {
-		sb.p.fading = sb.p.fading || sb.fade(n.Start) < 1
+		sb.p.fading = sb.p.fading || sb.fade(start) < 1
 	}
 	pc := sb.piece(link)
 	pc.spans = append(pc.spans, sp)
-	p.marks = append(p.marks, runMark{rune: p.runes, src: n.Start, end: n.End})
+	p.marks = append(p.marks, runMark{rune: p.runes, src: start, end: end})
 	p.runes++
-	return true
 }
 
 // codeStart returns where a code span's text starts in the source.
