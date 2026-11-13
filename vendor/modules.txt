@@ -58,6 +58,9 @@ github.com/go-text/typesetting/bidi
 github.com/go-text/typesetting/internal/unicodedata
 github.com/go-text/typesetting/language
 github.com/go-text/typesetting/segmenter
+# go.yaml.in/yaml/v3 v3.0.6
+## explicit; go 1.16
+go.yaml.in/yaml/v3
 # golang.org/x/image v0.46.0
 ## explicit; go 1.26.0
 golang.org/x/image/bmp

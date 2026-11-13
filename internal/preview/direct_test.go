@@ -128,7 +128,7 @@ func TestPreviewChoosesDirectOrDOM(t *testing.T) {
 func TestDirectCancellationDuringWrites(t *testing.T) {
 	ctx := &sanitizeCancelContext{Context: context.Background(), remaining: 40}
 	d := parser.Parse(strings.Repeat("Paragraph **bold**.\n\n", 1000))
-	result, err := renderDirect(ctx, d, limits{MaxHTMLSize, MaxDiagrams}, nil, 0)
+	result, err := renderDirect(ctx, d, limits{MaxHTMLSize, MaxDiagrams}, nil, 0, "")
 	if err != context.Canceled || result != "" {
 		t.Fatal("partial direct result published", err)
 	}

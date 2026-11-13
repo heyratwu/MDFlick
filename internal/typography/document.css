@@ -14,4 +14,14 @@ hr{border:0;border-top:2px solid var(--border);margin:1.6em 0}
 a{color:var(--link)}
 table{display:block;width:max-content;max-width:var(--wide-limit);overflow-x:auto;border-collapse:collapse}th,td{border:1px solid var(--quote-bar);padding:6px 10px;vertical-align:top;text-align:start;overflow-wrap:normal}th{background:var(--code-bg);font-weight:600}th>p,td>p{margin:0}
 img{max-width:100%;height:auto}
+.document-properties{margin:0 0 20px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--code-bg);font-size:14px;line-height:1.45;overflow-wrap:anywhere;container-type:inline-size}
+.document-properties summary{cursor:pointer;color:var(--secondary)}
+.properties-title{padding:6px 0;font-weight:600}
+.document-properties dl{margin:4px 0;display:grid;gap:6px}
+.document-properties dl>div{display:grid;grid-template-columns:min(132px, 34%) minmax(0, 1fr);gap:12px}
+.document-properties dt{padding-top:2px;font:12px/1.45 'SF Mono',Menlo,Consolas,monospace;color:var(--secondary);white-space:pre-wrap}
+.document-properties dd{margin:0;white-space:pre-wrap}
+.document-properties dd dl{margin-inline-start:10px}
+@media(max-width:473px){.document-properties dl>div{grid-template-columns:minmax(0, 1fr);gap:2px}}
+@container (max-width: 299px){.document-properties dl>div{grid-template-columns:minmax(0, 1fr);gap:2px}}
 pre.mermaid-rendered{background:transparent;font-family:inherit;white-space:normal;text-align:center}pre.mermaid-rendered svg{max-width:100%;height:auto}

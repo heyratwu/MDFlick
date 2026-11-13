@@ -30,12 +30,17 @@ type limits struct{ outputBytes, diagrams int }
 // Parsing remains synchronous. Passive AST output checks cancellation while
 // writing; raw HTML uses the full-document DOM sanitizer.
 func Render(ctx context.Context, source string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, Timeout)
-	defer cancel()
-	return render(ctx, source, limits{MaxHTMLSize, MaxDiagrams})
+	return RenderFile(ctx, source, "")
 }
 
-func render(ctx context.Context, source string, limit limits) (string, error) {
+// RenderFile uses the basename supplied by the file preview when labeling metadata.
+func RenderFile(ctx context.Context, source, filename string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, Timeout)
+	defer cancel()
+	return render(ctx, source, filename, limits{MaxHTMLSize, MaxDiagrams})
+}
+
+func render(ctx context.Context, source, filename string, limit limits) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -44,6 +49,7 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 	}
 	started := time.Now()
 	processing := document.QuickLookLimits()
+	properties, source := document.SplitFrontMatter(source)
 	parsed, err := processing.Parse(ctx, source)
 	if err != nil {
 		return "", err
@@ -95,8 +101,12 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	var metadata string
+	if properties != nil {
+		metadata = propertiesHTML(properties, filename)
+	}
 	if !requiresDOM {
-		return renderDirect(ctx, parsed, limit, codeBlocks, diagrams)
+		return renderDirect(ctx, parsed, limit, codeBlocks, diagrams, metadata)
 	}
 	started = time.Now()
 	generated := parsed.HTML()
@@ -126,7 +136,7 @@ func render(ctx context.Context, source string, limit limits) (string, error) {
 		return "", err
 	}
 	started = time.Now()
-	head, scripts := previewEnvelope(diagrams)
+	head, scripts := previewEnvelope(diagrams, metadata)
 	fixedBytes := len(head) + len(scripts) + len(tail)
 	if fixedBytes > limit.outputBytes {
 		return "", document.ResourceLimit
@@ -213,13 +223,13 @@ func headingText(n *html.Node) string {
 
 const tail = `</body></html>`
 
-func previewEnvelope(diagrams int) (head, scripts string) {
+func previewEnvelope(diagrams int, metadata string) (head, scripts string) {
 	policy := ""
 	if diagrams > 0 {
 		scripts, policy = mermaid.Scripts()
 	}
 	head = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ` + policy + `"><style>` + typography.CSS() + `
-</style></head><body>`
+</style></head><body>` + metadata
 
 	return head, scripts
 }

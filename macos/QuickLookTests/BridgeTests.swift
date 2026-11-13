@@ -26,6 +26,11 @@ struct BridgeTests {
             let html = try PreviewBridge.render(Data("\u{FEFF}# 中文\n".utf8))
             precondition(html.contains("<h1 id=\"中文\">中文</h1>"))
         }
+        let skill = Data("---\nname: example\n---\n# Example\n".utf8)
+        let skillHTML = try PreviewBridge.render(skill, filename: "SKILL.md")
+        let ordinaryHTML = try PreviewBridge.render(skill, filename: "skill.md")
+        precondition(skillHTML.contains(">SKILL 信息</div>"))
+        precondition(ordinaryHTML.contains(">文档属性</div>"))
         do {
             _ = try PreviewBridge.render(Data([0xff]))
             preconditionFailure("invalid UTF-8 accepted")

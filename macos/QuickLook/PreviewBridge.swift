@@ -34,13 +34,15 @@ enum PreviewBridge {
         }
     }
 
-    static func render(_ data: Data, request supplied: PreviewRequest? = nil) throws -> String {
+    static func render(_ data: Data, filename: String = "", request supplied: PreviewRequest? = nil) throws -> String {
         let request = supplied ?? PreviewRequest()
         try request.check()
         var output: UnsafeMutablePointer<CChar>?
         let status = data.withUnsafeBytes { bytes in
-            MDPreviewRenderRequest(request.handle, UnsafeMutablePointer(mutating: bytes.baseAddress?.assumingMemoryBound(to: CChar.self)),
-                            Int32(clamping: data.count), &output)
+            filename.withCString { name in
+                MDPreviewRenderFileRequest(request.handle, UnsafeMutablePointer(mutating: bytes.baseAddress?.assumingMemoryBound(to: CChar.self)),
+                                           Int32(clamping: data.count), UnsafeMutablePointer(mutating: name), &output)
+            }
         }
         defer { MDPreviewFree(output) }
         guard status == 0 else { throw error(status) }

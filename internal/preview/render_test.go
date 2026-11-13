@@ -71,7 +71,7 @@ func TestRenderLimits(t *testing.T) {
 		{"final", "# Small", 128},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := render(context.Background(), tc.source, limits{tc.limit, MaxDiagrams})
+			result, err := render(context.Background(), tc.source, "", limits{tc.limit, MaxDiagrams})
 			if !errors.Is(err, document.ResourceLimit) || result != "" {
 				t.Fatal("output limit ignored", err)
 			}
@@ -171,11 +171,11 @@ func TestRenderExactOutputBudget(t *testing.T) {
 		"```mermaid\nflowchart LR; A-->B\n```",
 	} {
 		expected := renderHTML(t, source)
-		result, err := render(context.Background(), source, limits{len(expected), MaxDiagrams})
+		result, err := render(context.Background(), source, "", limits{len(expected), MaxDiagrams})
 		if err != nil || result != expected {
 			t.Fatal("exact output allowance failed", err)
 		}
-		result, err = render(context.Background(), source, limits{len(expected) - 1, MaxDiagrams})
+		result, err = render(context.Background(), source, "", limits{len(expected) - 1, MaxDiagrams})
 		if !errors.Is(err, document.ResourceLimit) || result != "" {
 			t.Fatal("body and bundled scripts exceeded shared allowance", err)
 		}
@@ -210,7 +210,7 @@ func TestCancelDuringOutputReturnsNoDocument(t *testing.T) {
 	// Large enough for several serialization-buffer flushes. Cancellation happens
 	// after some bytes have been written into the private output builder.
 	source := "<!-- raw HTML -->\n\n" + strings.Repeat("Paragraph **bold** & < literal.\n\n", 2000)
-	result, err := render(ctx, source, limits{MaxHTMLSize, MaxDiagrams})
+	result, err := render(ctx, source, "", limits{MaxHTMLSize, MaxDiagrams})
 	if err != context.Canceled || result != "" || lastStage != "preview.sanitize" {
 		t.Fatalf("output cancellation published a document or entered a later stage: %v, %s", err, lastStage)
 	}

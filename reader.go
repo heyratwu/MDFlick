@@ -79,6 +79,10 @@ func (a *readerWindow) view(c *ui.Context) {
 				Revision uint64
 			}{a.path, a.revision}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
 				ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(40, 0, 120, 0).FontWeight(400).Children(func() {
+					if properties := a.prepared.frontMatter; properties != nil {
+						readerProperties(c, properties, a.path, prose)
+					}
+					c.Key("document-body")
 					markdown.ViewDocument(c, a.prepared.parsed, a.md)
 					if a.source == "" {
 						ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted)

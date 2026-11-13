@@ -15,9 +15,9 @@ import (
 // passive markup straight from the AST, without a generated HTML string or DOM.
 // Documents containing raw HTML retain the full-document sanitizer: filtering
 // isolated tags would break containers spanning multiple Markdown blocks.
-func renderDirect(ctx context.Context, d *parser.Document, limit limits, code []bool, diagrams int) (string, error) {
+func renderDirect(ctx context.Context, d *parser.Document, limit limits, code []bool, diagrams int, metadata string) (string, error) {
 	started := time.Now()
-	head, scripts := previewEnvelope(diagrams)
+	head, scripts := previewEnvelope(diagrams, metadata)
 	fixed := len(head) + len(scripts) + len(tail)
 	if fixed > limit.outputBytes {
 		return "", document.ResourceLimit

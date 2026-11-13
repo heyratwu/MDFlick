@@ -62,7 +62,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
                 self?.logger.debug("Preview read: \(ProcessInfo.processInfo.systemUptime - readStarted, privacy: .public)s, bytes: \(data.count, privacy: .public)")
                 stage = "render document"
                 let renderStarted = ProcessInfo.processInfo.systemUptime
-                let html = try PreviewBridge.render(data, request: token)
+                let html = try PreviewBridge.render(data, filename: url.lastPathComponent, request: token)
                 self?.logger.debug("Preview bridge: \(ProcessInfo.processInfo.systemUptime - renderStarted, privacy: .public)s")
                 try token.check()
                 DispatchQueue.main.async {

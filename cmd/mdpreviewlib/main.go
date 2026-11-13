@@ -63,11 +63,20 @@ func MDPreviewRequestStatus(id C.ulonglong) C.int {
 	return C.int(document.CodeOf(ctx.Err()))
 }
 
-// MDPreviewRenderRequest borrows input only until return. Cancellation and the
-// deadline include time spent waiting for the process-wide rendering slot.
-//
 //export MDPreviewRenderRequest
-func MDPreviewRenderRequest(id C.ulonglong, input *C.char, size C.int, output **C.char) (status C.int) {
+func MDPreviewRenderRequest(id C.ulonglong, input *C.char, size C.int, output **C.char) C.int {
+	return renderRequest(id, input, size, "", output)
+}
+
+// MDPreviewRenderFileRequest also accepts the document's NUL-terminated basename.
+//
+//export MDPreviewRenderFileRequest
+func MDPreviewRenderFileRequest(id C.ulonglong, input *C.char, size C.int, filename *C.char, output **C.char) C.int {
+	return renderRequest(id, input, size, C.GoString(filename), output)
+}
+
+// Input is borrowed until return. The deadline includes waiting for a slot.
+func renderRequest(id C.ulonglong, input *C.char, size C.int, filename string, output **C.char) (status C.int) {
 	if output == nil {
 		return C.int(document.InvalidArgument)
 	}
@@ -109,7 +118,7 @@ func MDPreviewRenderRequest(id C.ulonglong, input *C.char, size C.int, output **
 	if err != nil {
 		return C.int(document.CodeOf(err))
 	}
-	html, err := preview.Render(ctx, source)
+	html, err := preview.RenderFile(ctx, source, filename)
 	if err != nil {
 		return C.int(document.CodeOf(err))
 	}

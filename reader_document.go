@@ -13,11 +13,12 @@ import (
 // it: MyGo's lazy inline caches make parser.Document mutable, even when displayed
 // as read-only. Never share a published parse with a worker or another window.
 type preparedReaderDocument struct {
-	markdown   string
-	parsed     *parser.Document
-	ranges     []document.HTMLAlignment
-	images     map[int]document.HTMLImage
-	hasMermaid bool
+	frontMatter *document.FrontMatter
+	markdown    string
+	parsed      *parser.Document
+	ranges      []document.HTMLAlignment
+	images      map[int]document.HTMLImage
+	hasMermaid  bool
 }
 
 func prepareReaderDocument(ctx context.Context, source string) (preparedReaderDocument, error) {
@@ -37,6 +38,7 @@ func prepareReaderDocumentWithLimits(parent context.Context, source string, limi
 	if len(source) > document.MaxSize {
 		return result, document.TooLarge
 	}
+	result.frontMatter, source = document.SplitFrontMatter(source)
 	parsed, err := limit.Parse(ctx, source)
 	diagnostics.Record(ctx, "native.parse", started, len(source))
 	if err != nil {
