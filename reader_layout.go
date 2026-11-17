@@ -24,11 +24,15 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 	if a.path != "" {
 		title = filepath.Base(a.path) + " — MDFlick"
 	}
+	background, foreground := ui.Hex("#F4F3F4"), ui.Hex("#4A4A4A")
+	if c.Theme().Dark {
+		background, foreground = ui.Hex("#2B2B2B"), ui.Hex("#E4E4E4")
+	}
 	// Equal insets keep the title centered while clearing native controls.
 	inset := max(bar.Left, bar.Right) + 12
 	ui.Row(c).Height(readerTitleBarHeight).Shrink(0).Padding(0, inset).
-		Background(ui.Hex("#F4F3F4")).Center().DragWindow().Children(func() {
-		ui.Text(c, title).FontSize(13).FontWeight(500).TextColor(ui.Hex("#4A4A4A")).MaxWidth(600)
+		Background(background).Center().DragWindow().Children(func() {
+		ui.Text(c, title).FontSize(13).FontWeight(500).TextColor(foreground).MaxWidth(600)
 	})
 }
 
