@@ -2,7 +2,7 @@
 
 ```sh
 CGO_ENABLED=0 go test ./...
-go tool mygo vet .
+go -C tools tool mygo vet ..
 go test -race ./...
 bash scripts/test-macos-bridge.sh
 node --test internal/mermaid/render.test.cjs  # 仅 JS 调度测试需要 Node，应用运行不需要

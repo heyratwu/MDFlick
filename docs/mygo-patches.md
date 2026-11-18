@@ -1,29 +1,32 @@
 # MyGo 本地补丁
 
-当前仍锁定 `github.com/egoist/mygo v0.7.3`。使用 Go 标准 `vendor/`，仅修改以下框架文件：
+当前锁定 `github.com/egoist/mygo v0.10.0`。使用 Go 标准 `vendor/`，仅修改以下框架文件：
 
-- `ui/markdown/view.go`：`ViewDocument` 接收预解析文档；`Options.BlockStyle` 配置原始块容器；`Options.ResolveImage` 允许应用直接查询图片缓存，绕过框架默认的逐地址 goroutine 和缓存；`Options.LinkIcon` 在链接文字前绘制可点击的行内图标。
+- `ui/markdown/view.go`：`ViewDocument` 接收预解析文档；`Options.BlockStyle` 配置原始块容器；`Options.ResolveImage` 允许应用直接查询图片缓存，绕过框架默认的逐地址 goroutine 和缓存。
 - `ui/bitmap.go`：`Bitmap.SetLogicalSize` 将默认显示尺寸与实际像素尺寸分离，用于浏览器生成的高清 SVG 位图；`Size` 仍返回像素尺寸，`ImageSize` 返回显示尺寸。
-- `ui/markdown/spans.go` 和 `ui/markdown/copy.go`：链接图标参与段落和表格排版，复制时略去图标。
 - `ui/markdown/image.go`：可选图片解析回调接收当前图片容器，应用只绑定持久 Handle，不保留元素；未设置回调时保留框架默认行为；图片比例通过 `ui.ImageSize` 读取，尊重高清位图的逻辑尺寸。
 - `ui/presentation.go`、`ui/runtime.go`、`ui/context.go`：`Context.AfterPresent` 在最终构建 pass 的帧提交到 surface 后执行一次回调。窗口尚未实际提交时不报告；回调不在绘制函数内执行。
 
 - `ui/markdown/code.go`：未改变的代码块按 revision 复用缓存；`Options.HighlightLimit` 可让大代码块使用可选择的完整纯文本，零值保持无限制高亮。
 - `ui/text_matches.go`、`ui/element.go`、`ui/paint.go`、`ui/scroll.go`：文档搜索遍历渲染后的段落，在原有字形布局下绘制命中背景，让滚动容器定位到当前命中，并在搜索期间保持滚动条可见、标出命中的文档位置。
 
-完整补丁在 `patches/mygo-v0.7.3.patch`。vendor 中的其余第三方源码保持 `go mod vendor` 原样，许可证随源码保留。源码纳入仓库不等于向二进制添加框架功能或另一个运行时。
+链接图标使用 MyGo 自带的 `Options.LinkIcon`，复制文本时略去图标。阅读器和 Quick Look 显式沿用 GFM、脚注和数学扩展。
+
+完整补丁在 `patches/mygo-v0.10.0.patch`。vendor 中的其余第三方源码保持 `go mod vendor` 原样，许可证随源码保留。源码纳入仓库不等于向二进制添加框架功能或另一个运行时。
 
 ## 更新依赖
 
 ```sh
 bash scripts/vendor.sh
 CGO_ENABLED=0 go test ./...
-go tool mygo vet .
+go -C tools tool mygo vet ..
 go test -race ./...
 bash scripts/test-macos-bridge.sh
 ```
 
-不要单独运行 `go mod vendor`：它会覆盖本地补丁。不要使用 `-mod=mod` 绕过 vendor；应用需要这里新增的 API。`scripts/vendor.sh` 先检查 MyGo 版本、重新生成 vendor，再验证并应用补丁。升级 MyGo 时必须先审查并移植补丁；脚本会拒绝将 v0.7.3 的补丁直接用于其他版本。
+不要单独运行 `go mod vendor`：它会覆盖本地补丁。不要使用 `-mod=mod` 绕过 vendor；应用需要这里新增的 API。`scripts/vendor.sh` 先检查 MyGo 版本、重新生成 vendor，再验证并应用补丁。升级 MyGo 时必须先审查并移植补丁；脚本会拒绝将 v0.10.0 的补丁直接用于其他版本。
+
+MyGo CLI 由 `tools/go.mod` 单独锁定，CLI 的打包依赖由 Go 模块缓存管理。从仓库根目录运行 `go -C tools tool mygo dev ..`，末尾的 `..` 指向应用目录。升级时同步更新根模块和 `tools/` 模块的 MyGo 版本，再分别运行 `go mod tidy` 和 `go -C tools mod tidy`。`scripts/vendor.sh` 会校验两处版本一致。
 
 ## 文档所有权
 

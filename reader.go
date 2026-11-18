@@ -77,7 +77,9 @@ func (a *readerWindow) view(c *ui.Context) {
 			a.md.BlockStyle = a.readerBlockStyle
 			a.md.Block = a.nativeHTMLBlock
 			a.md.OnLink = a.linkHandler(c)
-			a.md.LinkIcon = localDocumentIcon
+			a.md.LinkIcon = func(dest string, size float32) (markdown.InlineObject, bool) {
+				return localDocumentIcon(dest, size, a.md.Theme.Link)
+			}
 			finishDiagrams := a.beginDiagramFrame(c)
 			defer finishDiagrams()
 			finishImages := a.beginImageFrame(c)

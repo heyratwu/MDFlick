@@ -23,8 +23,8 @@ func TestReaderLocalDocumentLinks(t *testing.T) {
 		{"Relative", filepath.Join(base, "other notes.MD")},
 		{"Absolute", absolute},
 	} {
-		// The inline object occupies the first character of the link.
-		r, ok := tt.Find("\uFFFC" + tc.label)
+		// MyGo keeps the inline object and link label together with a word joiner.
+		r, ok := tt.Find("\uFFFC\u2060" + tc.label)
 		if !ok {
 			t.Fatalf("missing icon for %s in %q", tc.label, tt.Texts())
 		}

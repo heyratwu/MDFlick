@@ -34,7 +34,10 @@ func (l ProcessingLimits) Parse(ctx context.Context, source string) (*parser.Doc
 	if len(source) > l.ConvertedBytes {
 		return nil, ResourceLimit
 	}
-	d := parser.Parse(source)
+	// Match the reader and Quick Look's supported syntax. MyGo's
+	// newer default adds alerts, mentions and issue references.
+	d := parser.New(parser.GFM | parser.ExtFootnotes | parser.ExtMath)
+	d.Set(source)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -23,6 +23,7 @@ func TestDirectMatchesPassiveDOM(t *testing.T) {
 		"| Left | Center | Right |\n|:---|:---:|---:|\n| [A](#a) | `x` | ![alt](x) |\n",
 		"A[^n] and B[^other] and A[^n].\n\n[^n]: note\n\n    ```mermaid\n    flowchart LR; X-->Y\n    ```\n\n[^other]: Other.\n\n```mermaid\nflowchart LR; A-->B\n```\n",
 		"Math \\(a < b\\).\n\n$$\na < b\n$$\n",
+		"# @octocat and #123\n\n> [!NOTE]\n> Plain block quote.\n",
 	}
 	for _, tc := range testfixtures.PerformanceCases() {
 		if tc.Name != "html-500" {
@@ -30,7 +31,8 @@ func TestDirectMatchesPassiveDOM(t *testing.T) {
 		}
 	}
 	for _, source := range sources {
-		d := parser.Parse(source)
+		d := parser.New(parser.GFM | parser.ExtFootnotes | parser.ExtMath)
+		d.Set(source)
 		var markers []bool
 		for i := 0; i < d.Len(); i++ {
 			b := d.Block(i)

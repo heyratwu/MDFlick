@@ -32,6 +32,8 @@ The native UI rules below apply where the app uses package `ui`; preserve a web 
 
 ## Verification
 
+In MDFlick, run the MyGo CLI from its tools module. From the repository root, use `go -C tools tool mygo vet ..` and `go -C tools tool mygo migrate-ui [-write] ..` for the commands below.
+
 - Reproduce UI failures with `ui.NewTester`. Exercise extra frames while elements disappear and return, plus relevant focus, typing, and shortcut behavior.
 - Run targeted regression tests, `go tool mygo vet .` for stored build values and goroutine captures, and `CGO_ENABLED=0 go test ./...`. Use race checks when changing shared state, and inspect rendered output or the native app when changing layout/platform behavior, respecting the user's verification preferences.
 - For upgrades, preview with `go tool mygo migrate-ui .`, apply with `-write`, and review persistent identity/services, separately assigned keys and derived bound values manually. Verify affected API/lifecycle assumptions against the new pinned source and rerun relevant UI tests. Report remaining platform-specific verification limits.

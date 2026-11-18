@@ -10,7 +10,7 @@ fi
 # Build into a fresh directory: an old setup must never satisfy validation.
 staging=$(mktemp -d "$PWD/.windows-build.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
-go tool mygo build -platform "windows/$arch" -o "$staging"
+go -C tools tool mygo build -platform "windows/$arch" -o "$staging" ..
 output="$staging/windows-$arch"
 shopt -s nullglob
 installers=("$output"/*-setup-*-"$arch".exe)

@@ -24,7 +24,7 @@ func TestNativeAdapterLinkContract(t *testing.T) {
 				visited = ""
 				text := label
 				if local {
-					text = "\uFFFC" + text
+					text = "\uFFFC\u2060" + text
 				}
 				// Paragraph bounds span the prose column; click the glyphs
 				// instead of the empty center of a left-aligned paragraph.

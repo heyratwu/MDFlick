@@ -24,9 +24,9 @@
 使用 go.mod 指定的 Go 工具链和 macOS Command Line Tools：
 
 ```sh
-go tool mygo dev
+go -C tools tool mygo dev ..
 CGO_ENABLED=0 go test ./...
-go tool mygo vet .
+go -C tools tool mygo vet ..
 go test -race ./...
 bash scripts/test-macos-bridge.sh  # macOS：实际 Swift/C/Go 边界测试
 bash scripts/test-svg-browser.sh   # macOS：WebKit SVG 徽章像素回归
@@ -54,7 +54,7 @@ Mermaid 使用内置的 11.4.1 运行时，无需安装 Node.js 或联网。可�
 
 ## 构建 macOS 安装包
 
-**使用下面的脚本构建发布产物**；单独运行 `go tool mygo build` 只会生成主程序，不会包含 Quick Look 扩展。
+**使用下面的脚本构建发布产物**；单独运行 `go -C tools tool mygo build ..` 只会生成主程序，不会包含 Quick Look 扩展。
 
 ```sh
 bash scripts/build-macos.sh arm64  # Apple Silicon

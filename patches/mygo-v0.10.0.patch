@@ -1,0 +1,633 @@
+--- a/vendor/github.com/egoist/mygo/ui/context.go
++++ b/vendor/github.com/egoist/mygo/ui/context.go
+@@ -100,6 +100,7 @@
+ }
+ 
+ func (c *context) reset(now time.Time, w, h float32) {
++	c.rt.afterPresent = nil
+ 	for _, f := range c.rt.focusFields {
+ 		clear(f.members)
+ 		f.members = f.members[:0]
+--- a/vendor/github.com/egoist/mygo/ui/runtime.go
++++ b/vendor/github.com/egoist/mygo/ui/runtime.go
+@@ -108,6 +108,7 @@
+ // the view function, lays them out, paints them and routes input to the
+ // elements of the last frame. Main thread only, except where noted.
+ type engine struct {
++	afterPresent []func()
+ 	// inlineRects is placeInline's scratch, kept from frame to frame.
+ 	inlineRects []text.Rect
+ 	// byPosition holds the keys whose press stood for its physical key
+@@ -1003,6 +1004,7 @@
+ 	rt.c.finish()
+ 	clear(rt.byID)
+ 	rt.stats.end(rt)
++	rt.notifyPresented()
+ }
+ 
+ // now returns the time, which a Tester sets (clock).
+@@ -1209,6 +1211,7 @@
+ 	rt.text.EndFrame()
+ 	rt.next()
+ 	rt.stats.end(rt)
++	rt.notifyPresented()
+ }
+ 
+ // makeRoom prepares a recovery paint. On the last try, a still-full
+--- /dev/null
++++ b/vendor/github.com/egoist/mygo/ui/presentation.go
+@@ -0,0 +1,22 @@
++package ui
++
++// AfterPresent runs fn once on the UI thread after this build's frame has been
++// submitted to the surface. Register during each build that needs a callback;
++// earlier passes in the same frame are discarded. It does not mean scanout or
++// that the user saw the pixels. Callbacks must not retain build elements.
++func (c *Context) AfterPresent(fn func()) {
++	if c.build() != nil && fn != nil {
++		c.rt.afterPresent = append(c.rt.afterPresent, fn)
++	}
++}
++
++func (rt *engine) notifyPresented() {
++	if h, ok := rt.host.(*windowHost); ok && h.framePath() == "" {
++		return
++	}
++	callbacks := rt.afterPresent
++	rt.afterPresent = nil
++	for _, fn := range callbacks {
++		fn()
++	}
++}
+--- a/vendor/github.com/egoist/mygo/ui/markdown/view.go
++++ b/vendor/github.com/egoist/mygo/ui/markdown/view.go
+@@ -93,6 +93,10 @@
+ 	// views to show; until it has, they show its description. Without
+ 	// it, images show as their descriptions. FileImages loads files.
+ 	LoadImage func(url string) (ui.ImageSource, error)
++	// ResolveImage overrides LoadImage and its internal cache. It must return
++	// immediately, using an application-owned cache and scheduler. box is this
++	// image's container; it may be bound to a Handle but must not be retained.
++	ResolveImage func(c *ui.Context, url string, box ui.Element) ui.ImageSource
+ 
+ 	// CodeBlock, when set, builds code blocks in place of DefaultCodeBlock,
+ 	// which it can call to wrap it; Code builds the code blocks of the
+@@ -102,6 +106,8 @@
+ 	// WrapCode wraps the lines of code blocks rather than scrolling them
+ 	// sideways.
+ 	WrapCode bool
++	// HighlightLimit renders larger code blocks as plain selectable text. Zero is unlimited.
++	HighlightLimit int
+ 	// Math, when set, builds blocks of display math from their TeX, which
+ 	// show as their TeX without it; math within text shows as its TeX.
+ 	Math func(c *ui.Context, tex string)
+@@ -120,6 +126,9 @@
+ 	// Block, when set, is asked first for each block, and builds it in
+ 	// its place when it returns true.
+ 	Block func(c *ui.Context, d *parser.Document, i int) bool
++	// BlockStyle configures a block container before its default contents are
++	// built. The element belongs to this build only; do not retain it.
++	BlockStyle func(c *ui.Context, d *parser.Document, i int, box ui.Element)
+ 
+ 	// Reveal is how Stream shows text as it comes: DefaultReveal when nil.
+ 	Reveal *Reveal
+@@ -152,7 +161,18 @@
+ //
+ //	markdown.View(c, app.readme, &app.md)
+ func View(c *ui.Context, src string, o *Options) ui.Element {
+-	return build(c, src, o, false)
++	return build(c, src, o, false, nil)
++}
++
++// ViewDocument adopts a finished parse, exclusively owned by this view on the
++// UI thread after publication. It must not be shared with another view or worker:
++// inline parsing is lazy and mutates Document. Do not edit it while mounted.
++// Replacing the pointer resets paragraph, code and table caches.
++func ViewDocument(c *ui.Context, d *parser.Document, o *Options) ui.Element {
++	if d == nil {
++		return View(c, "", o)
++	}
++	return build(c, d.Source(), o, false, d)
+ }
+ 
+ // Stream shows src, Markdown still being written, as a language model's
+@@ -169,7 +189,7 @@
+ //		markdown.Stream(c, msg.text, &app.md)
+ //	}
+ func Stream(c *ui.Context, src string, o *Options) ui.Element {
+-	return build(c, src, o, true)
++	return build(c, src, o, true, nil)
+ }
+ 
+ // Revealed reports whether el, a view View or Stream returned this frame,
+@@ -209,13 +229,14 @@
+ 
+ // viewState is what a view keeps from frame to frame.
+ type viewState struct {
+-	o     *Options
+-	doc   *parser.Document
+-	ext   parser.Extensions
+-	uiTh  ui.Theme
+-	def   *Theme
+-	th    Theme
+-	paras []paraCache
++	o       *Options
++	doc     *parser.Document
++	adopted bool
++	ext     parser.Extensions
++	uiTh    ui.Theme
++	def     *Theme
++	th      Theme
++	paras   []paraCache
+ 	// tasks name the check boxes of tasks, by their items' blocks, while
+ 	// Options.OnTask makes them controls.
+ 	tasks []taskLabel
+@@ -296,7 +317,7 @@
+ 
+ func newState() *viewState { return &viewState{scrollTo: -1} }
+ 
+-func build(c *ui.Context, src string, o *Options, streaming bool) ui.Element {
++func build(c *ui.Context, src string, o *Options, streaming bool, prepared *parser.Document) ui.Element {
+ 	if o == nil {
+ 		o = &defaultOptions
+ 	}
+@@ -304,26 +325,41 @@
+ 	st := *ui.Local(root, stateKey{}, newState)
+ 	st.o = o
+ 	ext := o.Extensions
++	if prepared != nil {
++		ext = prepared.Extensions()
++	}
+ 	if ext == 0 {
+ 		ext = parser.Default
+ 	}
+-	documentChanged := st.doc == nil || st.ext != ext
++	documentChanged := st.doc == nil || st.ext != ext || st.adopted != (prepared != nil) ||
++		prepared != nil && st.doc != prepared
+ 	if documentChanged {
+-		st.doc, st.ext = parser.New(ext), ext
++		st.forget()
++		st.adopted = prepared != nil
++		st.doc, st.ext = prepared, ext
++		if st.doc == nil {
++			st.doc = parser.New(ext)
++		}
+ 		st.paras, st.tasks = st.paras[:0], st.tasks[:0]
+ 	}
+ 	st.theme(c)
+ 	th := &st.th
+ 
+-	shown, revealing := st.reveal.step(c, src, streaming, o.Reveal)
+-	st.doc.SetStreaming(streaming || revealing)
+-	if !strings.HasPrefix(src[:shown], st.doc.Source()) {
+-		// Another text, not more of it: blocks where blocks were may
+-		// show other text.
+-		st.forget()
+-		documentChanged = true
++	revealing := false
++	if prepared == nil {
++		var shown int
++		shown, revealing = st.reveal.step(c, src, streaming, o.Reveal)
++		st.doc.SetStreaming(streaming || revealing)
++		if !strings.HasPrefix(src[:shown], st.doc.Source()) {
++			// Another text, not more of it: blocks where blocks were may
++			// show other text.
++			st.forget()
++			documentChanged = true
++		}
++		st.doc.Set(src[:shown])
++	} else if documentChanged {
++		st.reveal = revealState{src: src, shown: len(src)}
+ 	}
+-	st.doc.Set(src[:shown])
+ 	if o.Anchor != "" && (documentChanged || st.anchor != o.Anchor || st.anchorVersion != o.AnchorVersion) {
+ 		st.scrollTo = st.anchorNamed(strings.TrimPrefix(o.Anchor, "#"))
+ 	}
+@@ -451,10 +487,15 @@
+ 	b := d.Block(i)
+ 	defer func(prev int) { st.cur = prev }(st.cur)
+ 	st.cur = i
+-	if o.Block != nil {
++	if o.Block != nil || o.BlockStyle != nil {
+ 		box := ui.Column(c)
++		if o.BlockStyle != nil {
++			o.BlockStyle(c, d, i, box)
++		}
+ 		done := false
+-		box.Children(func() { done = o.Block(c, d, i) })
++		if o.Block != nil {
++			box.Children(func() { done = o.Block(c, d, i) })
++		}
+ 		if done {
+ 			return box
+ 		}
+--- a/vendor/github.com/egoist/mygo/ui/markdown/image.go
++++ b/vendor/github.com/egoist/mygo/ui/markdown/image.go
+@@ -79,32 +79,35 @@
+ 				continue
+ 			}
+ 			alt := parser.PlainText(in[k+1 : n.Next])
+-			src := st.image(c, n.Dest)
+-			if src == nil || n.Pending {
+-				label := alt
+-				if label == "" {
+-					label = l10n.In(c.Locale()).Image()
+-				}
+-				ph := ui.Row(c).Padding(th.em(0.5), th.em(0.75)).Radius(th.em(0.3)).Background(th.CodeBackground)
+-				ph.Role(ui.RoleImage).Label(alt)
+-				ph.Children(func() { ui.Text(c, label).TextColor(th.Muted).FontSize(th.em(0.875)) })
+-				continue
++			if st.o.ResolveImage != nil {
++				box := ui.Column(c).MaxWidthPercent(100)
++				src := st.o.ResolveImage(c, n.Dest, box)
++				box.Children(func() { st.imageContent(c, n, alt, src) })
++			} else {
++				st.imageContent(c, n, alt, st.image(c, n.Dest))
+ 			}
+-			img := ui.Image(c, src).Radius(th.em(0.3)).MaxWidthPercent(100).Label(alt)
+-			var w, h float32
+-			switch s := src.(type) {
+-			case *ui.Bitmap:
+-				iw, ih := s.Size()
+-				w, h = float32(iw), float32(ih)
+-			case *ui.SVG:
+-				w, h = s.Size()
+-			}
+-			if w > 0 && h > 0 {
+-				img.AspectRatio(w / h)
+-			}
+-			if n.Title != "" {
+-				img.Tooltip(n.Title)
+-			}
+ 		}
+ 	})
+ }
++
++func (st *viewState) imageContent(c *ui.Context, n *parser.Inline, alt string, src ui.ImageSource) {
++	th := &st.th
++	if src == nil || n.Pending {
++		label := alt
++		if label == "" {
++			label = l10n.In(c.Locale()).Image()
++		}
++		ph := ui.Row(c).Padding(th.em(0.5), th.em(0.75)).Radius(th.em(0.3)).Background(th.CodeBackground)
++		ph.Role(ui.RoleImage).Label(alt)
++		ph.Children(func() { ui.Text(c, label).TextColor(th.Muted).FontSize(th.em(0.875)) })
++		return
++	}
++	img := ui.Image(c, src).Radius(th.em(0.3)).MaxWidthPercent(100).Label(alt)
++	w, h := ui.ImageSize(src)
++	if w > 0 && h > 0 {
++		img.AspectRatio(w / h)
++	}
++	if n.Title != "" {
++		img.Tooltip(n.Title)
++	}
++}
+--- a/vendor/github.com/egoist/mygo/ui/markdown/code.go
++++ b/vendor/github.com/egoist/mygo/ui/markdown/code.go
+@@ -39,14 +39,17 @@
+ // codeState is what a view keeps of a code block: the tokens of its lines
+ // and the spans of its chunks of lines, to highlight only what changed.
+ type codeState struct {
+-	lang     string
+-	tok      editor.Tokenizer
+-	lines    []string
+-	ends     []uint64
+-	toks     [][]editor.Token
+-	chunks   []codeChunk
+-	copiedAt time.Time
+-	seen     bool
++	lang           string
++	tok            editor.Tokenizer
++	lines          []string
++	ends           []uint64
++	toks           [][]editor.Token
++	chunks         []codeChunk
++	copiedAt       time.Time
++	seen           bool
++	revision       uint32
++	highlightLimit int
++	plain          bool
+ }
+ 
+ // codeChunk is chunkLines lines of a code block, laid out as one text, so
+@@ -189,6 +192,22 @@
+ // the spans of the chunks they are in anew.
+ func (st *viewState) highlight(cs *codeState, i int) {
+ 	d := st.doc
++	revision := d.Block(i).Revision()
++	if cs.revision == revision && cs.highlightLimit == st.o.HighlightLimit && len(cs.chunks) > 0 {
++		return
++	}
++	plain := st.o.HighlightLimit > 0 && d.Block(i).End-d.Block(i).Start > st.o.HighlightLimit
++	if cs.highlightLimit != st.o.HighlightLimit || cs.plain != plain {
++		cs.lines = nil
++		cs.ends = nil
++		cs.toks = nil
++		cs.chunks = nil
++	}
++	cs.revision, cs.highlightLimit, cs.plain = revision, st.o.HighlightLimit, plain
++	tokenizer := cs.tok
++	if plain {
++		tokenizer = nil
++	}
+ 	n := d.LineCount(i)
+ 	// The first line that differs from those tokenized.
+ 	k0 := 0
+@@ -210,8 +229,8 @@
+ 	for k := k0; k < n; k++ {
+ 		line, _ := d.Line(i, k)
+ 		var toks []editor.Token
+-		if cs.tok != nil {
+-			toks, state = cs.tok.Tokenize(line, state, nil)
++		if tokenizer != nil {
++			toks, state = tokenizer.Tokenize(line, state, nil)
+ 		}
+ 		cs.lines = append(cs.lines, line)
+ 		cs.ends = append(cs.ends, state)
+--- a/vendor/github.com/egoist/mygo/ui/bitmap.go
++++ b/vendor/github.com/egoist/mygo/ui/bitmap.go
+@@ -21,8 +21,9 @@
+ // image is not free.
+ type Bitmap struct {
+ 	imageMark
+-	img  *scene.Image
+-	w, h int
++	img                *scene.Image
++	w, h               int
++	logicalW, logicalH float32
+ 	// levels are the bitmap halved again and again, made as it shows
+ 	// smaller, for drawing it smoothly: levels[k] is 2^(k+1) times
+ 	// smaller.
+@@ -259,7 +260,7 @@
+ 	b.fresh = 0
+ }
+ 
+-// Size returns the bitmap's size in pixels, which Image shows as DIPs.
++// Size returns the bitmap's size in pixels. ImageSize returns its display size.
+ func (b *Bitmap) Size() (w, h int) { return b.w, b.h }
+ 
+ // ReleasePixels drops the CPU pixels of a bitmap, those of its picture and
+@@ -323,6 +324,14 @@
+ 			s = halve(s)
+ 		}
+ 		return s.Pix
++	}
++}
++
++// SetLogicalSize sets the default display size in DIPs without changing pixels.
++// Call before publishing the bitmap to the UI thread.
++func (b *Bitmap) SetLogicalSize(w, h float32) {
++	if w > 0 && h > 0 && !math.IsInf(float64(w), 0) && !math.IsInf(float64(h), 0) {
++		b.logicalW, b.logicalH = w, h
+ 	}
+ }
+ 
+@@ -330,6 +339,9 @@
+ 	if b == nil {
+ 		return 0, 0
+ 	}
++	if b.logicalW > 0 && b.logicalH > 0 {
++		return b.logicalW, b.logicalH
++	}
+ 	return float32(b.w), float32(b.h)
+ }
+ 
+--- a/vendor/github.com/egoist/mygo/ui/element.go
++++ b/vendor/github.com/egoist/mygo/ui/element.go
+@@ -629,6 +629,8 @@
+ 	// look (ScrollbarStyle), its zero fields following the theme's.
+ 	barInset [4]float32
+ 	barStyle *ScrollbarStyle
++	matchBar *matchScrollbar
++	matches  *textMatches
+ 	// scrollBase is the offset of a List's content that its rows were
+ 	// placed at: placing moves them by how far the offset moved since.
+ 	scrollBase float64
+--- a/vendor/github.com/egoist/mygo/ui/paint.go
++++ b/vendor/github.com/egoist/mygo/ui/paint.go
+@@ -928,6 +928,9 @@
+ 	// Content transitions also paint the old layout; only the current text
+ 	// carries its selection, in the same position, clip and opacity as its glyphs.
+ 	if e := p.inline; e != nil && e.tl == l {
++		if e.matches != nil && l != nil {
++			p.textMatchBackgrounds(l, x, y, e.matches)
++		}
+ 		if ed := e.st.editor; ed != nil && e.flags&flagSelectable != 0 && p.rt.textSelectionVisible(e.st) {
+ 			if a, b := ed.selection(); a != b {
+ 				for _, r := range l.Selection(a, b) {
+@@ -1542,6 +1545,9 @@
+ 	g := scrollBars(Rect{e.x, e.y, st.w, st.h}, st.barInset, float32(w), float32(h), float32(x), float32(y), st.flags, style, st.rtl)
+ 	g.vertical = g.vertical && st.barFlags&flagScrollY != 0
+ 	g.horizontal = g.horizontal && st.barFlags&flagScrollX != 0
++	if g.vertical && e.matchBar != nil && style.Track.A == 0 {
++		p.Fill(g.vTrack, e.theme().Surface, 0)
++	}
+ 	if style.Track.A > 0 {
+ 		if g.vertical {
+ 			p.Fill(g.vTrack, style.Track, 0)
+@@ -1579,6 +1585,9 @@
+ 	grow := style.ThumbWidth+2 <= style.TrackWidth
+ 	if g.vertical {
+ 		p.scrollThumbFill(g.v, false, grow && dragging && !rt.scrollDrag.horizontal, vertical, style.Radius)
++		if e.matchBar != nil {
++			e.matchBar.paint(p, e, g.vTrack)
++		}
+ 	}
+ 	if g.horizontal {
+ 		p.scrollThumbFill(g.h, true, grow && dragging && rt.scrollDrag.horizontal, horizontal, style.Radius)
+--- a/vendor/github.com/egoist/mygo/ui/scroll.go
++++ b/vendor/github.com/egoist/mygo/ui/scroll.go
+@@ -344,6 +344,15 @@
+ 		e = e.parent
+ 	}
+ 	x, y, w, h := e.x, e.y, e.w, e.h
++	var topInset float32
++	if m := e.matches; m != nil && m.current >= 0 && e.tl != nil {
++		start := int(m.starts[m.current])
++		if rects := e.tl.Selection(start, start+m.length); len(rects) > 0 {
++			r := rects[0]
++			x, y, w, h = x+e.contentX()+r.X, y+e.contentY()+r.Y, r.W, r.H
++			topInset = m.topInset
++		}
++	}
+ 	if r, ok := clientCaret(e); ok {
+ 		// An app's text field shows its caret: the text it edits may be
+ 		// taller than the view, as a code editor as high as its lines.
+@@ -383,7 +392,12 @@
+ 				// Right to left, offsets count from the right.
+ 				sx = mx - sx
+ 			}
+-			sy := max(0, min(o.Block.offset(st.scrollY, cy, h, p.border[0], p.h-p.border[2]), my))
++			lo := p.border[0]
++			if p.flags&flagScrollY != 0 {
++				lo += topInset
++				topInset = 0
++			}
++			sy := max(0, min(o.Block.offset(st.scrollY, cy, h, lo, p.h-p.border[2]), my))
+ 			if smooth {
+ 				// The containers around go to where it will be.
+ 				rt.glideScroll(st, sx, sy, *o.Animation, e.c.now)
+--- /dev/null
++++ b/vendor/github.com/egoist/mygo/ui/text_matches.go
+@@ -0,0 +1,159 @@
++package ui
++
++import (
++	"sort"
++
++	"github.com/egoist/mygo/internal/text"
++)
++
++// VisitDocumentText visits display text in build order after Children returns.
++// Inline text, including links, is already joined into its paragraph. Control
++// labels and explicitly unselectable text are skipped.
++func (e Element) VisitDocumentText(visit func(Element, string)) {
++	if n := e.node(); n != nil {
++		n.visitDocumentText(visit)
++	}
++}
++
++func (n *node) visitDocumentText(visit func(Element, string)) {
++	if n.flags&(flagInvisible|flagInert|flagUnselectable|flagClickable|flagEditable) != 0 {
++		return
++	}
++	if n.kind == kindText {
++		if n.text != "" {
++			visit(wrapElement(n), n.text)
++		}
++		return
++	}
++	for child := n.first; child != nil; child = child.next {
++		child.visitDocumentText(visit)
++	}
++}
++
++type textMatches struct {
++	starts          []uint32
++	length, current int
++	color, active   Color
++	topInset        float32
++}
++
++// HighlightMatches colors sorted, non-overlapping rune ranges of equal
++// length without reshaping the text. current is the active range's index
++// or -1. ScrollIntoView on the same element reveals the active range, with
++// topInset reserved above it in the nearest vertical scroll container.
++func (e Element) HighlightMatches(starts []uint32, length, current int, color, active Color, topInset float32) {
++	if n := e.node(); n != nil && len(starts) > 0 && n.kind == kindText && !n.isInline() {
++		n.matches = &textMatches{starts, length, current, color, active, topInset}
++	}
++}
++
++type matchScrollbar struct{ normal, active Color }
++
++// SearchScrollbar keeps overflowing scroll bars visible and marks the
++// document positions of descendant text highlights on the vertical track.
++func (e Element) SearchScrollbar(normal, active Color) Element {
++	if n := e.node(); n != nil && n.flags&flagScrollY != 0 {
++		n.matchBar = &matchScrollbar{normal, active}
++		n.KeepScrollbars(true)
++	}
++	return e
++}
++
++func (bar *matchScrollbar) paint(p *Painter, scroll *node, track Rect) {
++	height := min(float32(2), track.H)
++	if height <= 0 {
++		return
++	}
++	// Paint at most one normal marker at each device-pixel row. The active
++	// mark goes last so it remains visible when many results share a row.
++	travel := track.H - height
++	rows := make([]bool, int(round(travel*p.scale))+1)
++	active := -1
++	origin := scroll.y - float32(scroll.st.scrollY-scroll.scrollBase)
++	var visit func(*node)
++	visit = func(n *node) {
++		if n.hidden || n.leaving != 0 || n.flags&(flagInvisible|flagAbsolute) != 0 {
++			return
++		}
++		if m := n.matches; m != nil && n.tl != nil {
++			starts := m.starts
++			first := 0
++			top := n.y + n.contentY() - origin
++			for _, line := range n.tl.Lines {
++				if first == len(starts) {
++					break
++				}
++				if int(starts[first]) >= line.End {
++					continue
++				}
++				end := first + sort.Search(len(starts)-first, func(i int) bool {
++					return int(starts[first+i]) >= line.End
++				})
++				fraction := (top + line.Y + line.Height/2) / float32(scroll.contentH)
++				row := int(round(travel * p.scale * max(0, min(fraction, 1))))
++				if m.current >= first && m.current < end {
++					active = row
++				} else {
++					rows[row] = true
++				}
++				first = end
++			}
++		}
++		for child := n.first; child != nil; child = child.next {
++			visit(child)
++		}
++	}
++	for child := scroll.first; child != nil; child = child.next {
++		visit(child)
++	}
++	paintRow := func(row int, color Color) {
++		p.Fill(Rect{track.X + 1, track.Y + float32(row)/p.scale, track.W - 2, height}, color, 0)
++	}
++	for row, marked := range rows {
++		if marked {
++			paintRow(row, bar.normal)
++		}
++	}
++	if active >= 0 {
++		paintRow(active, bar.active)
++	}
++}
++
++func (p *Painter) textMatchBackgrounds(l *text.Layout, x, y float32, m *textMatches) {
++	for li := range l.Lines {
++		line := &l.Lines[li]
++		first := sort.Search(len(m.starts), func(i int) bool { return int(m.starts[i])+m.length > line.Start })
++		if first == len(m.starts) || int(m.starts[first]) >= line.End ||
++			!p.visible(Rect{x + line.X, y + line.Y, line.Width, line.Height}, 0) {
++			continue
++		}
++		// Follow shaped clusters so matches keep their positions across
++		// wrapped lines, ligatures, and right-to-left runs.
++		for i := 0; i < len(line.Glyphs); {
++			g := line.Glyphs[i]
++			left, right := g.X, g.X+g.Advance
++			i++
++			for i < len(line.Glyphs) && line.Glyphs[i].Cluster == g.Cluster && line.Glyphs[i].Runes == g.Runes {
++				left = min(left, line.Glyphs[i].X)
++				right = max(right, line.Glyphs[i].X+line.Glyphs[i].Advance)
++				i++
++			}
++			end := g.Cluster + g.Runes
++			for k := first + sort.Search(len(m.starts)-first, func(j int) bool {
++				return int(m.starts[first+j])+m.length > g.Cluster
++			}); k < len(m.starts) && int(m.starts[k]) < end && g.Runes > 0; k++ {
++				start := int(m.starts[k])
++				a := float32(max(start, g.Cluster)-g.Cluster) / float32(g.Runes)
++				b := float32(min(start+m.length, end)-g.Cluster) / float32(g.Runes)
++				if g.RTL {
++					a, b = 1-b, 1-a
++				}
++				color := m.color
++				if k == m.current {
++					color = m.active
++				}
++				p.Fill(Rect{x + left + a*(right-left), y + line.Y, (b - a) * (right - left), line.Height}, color, 0)
++			}
++		}
++	}
++}

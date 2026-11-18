@@ -23,9 +23,9 @@ See [Project Architecture](docs/project-architecture.md) for architecture and re
 Use the Go toolchain specified in go.mod and the macOS Command Line Tools:
 
 ```sh
-go tool mygo dev
+go -C tools tool mygo dev ..
 CGO_ENABLED=0 go test ./...
-go tool mygo vet .
+go -C tools tool mygo vet ..
 go test -race ./...
 bash scripts/test-macos-bridge.sh  # macOS: tests the actual Swift/C/Go boundary
 ```
@@ -52,7 +52,7 @@ The main window and Quick Look share the 32 MiB / UTF-8 rules (BOM allowed), val
 
 ## Building macOS Installers
 
-**Use the scripts below to build release artifacts.** Running `go tool mygo build` on its own builds only the main app and does not include the Quick Look extension.
+**Use the scripts below to build release artifacts.** Running `go -C tools tool mygo build ..` on its own builds only the main app and does not include the Quick Look extension.
 
 ```sh
 bash scripts/build-macos.sh arm64  # Apple Silicon

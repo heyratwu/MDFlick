@@ -54,6 +54,7 @@ type matchScrollbar struct{ normal, active Color }
 func (e Element) SearchScrollbar(normal, active Color) Element {
 	if n := e.node(); n != nil && n.flags&flagScrollY != 0 {
 		n.matchBar = &matchScrollbar{normal, active}
+		n.KeepScrollbars(true)
 	}
 	return e
 }

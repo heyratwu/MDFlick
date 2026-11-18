@@ -7,7 +7,7 @@ case "$arch" in arm64) swift_arch=arm64 ;; amd64) swift_arch=x86_64 ;; *) echo '
 identity="${SIGNING_IDENTITY:--}"
 export GOCACHE="${GOCACHE:-$PWD/.mygo/go-cache}"
 export CLANG_MODULE_CACHE_PATH="$PWD/.mygo/clang-cache"
-go tool mygo build -platform "darwin/$arch" -skip-dmg -sign "$identity"
+go -C tools tool mygo build -platform "darwin/$arch" -skip-dmg -sign "$identity" ..
 app="build/darwin-$arch/MDFlick.app"
 if [[ ! -d "$app" ]]; then echo "Missing app: $app" >&2; exit 1; fi
 extension="$app/Contents/PlugIns/MDFlickQuickLook.appex"
