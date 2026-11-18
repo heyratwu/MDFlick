@@ -25,6 +25,7 @@ type readerWindow struct {
 	diagramFrame   map[diagramKey]float32
 	blockIndent    float32
 	scroll         ui.ScrollState
+	find           readerFind
 	html           readerHTMLState
 	open           func()
 	openDocument   func(string)
@@ -35,6 +36,12 @@ type readerWindow struct {
 
 func (a *readerWindow) view(c *ui.Context) {
 	t := c.Theme()
+	if a.prepared.parsed != nil {
+		c.OnShortcut(ui.Cmd, ui.KeyF, a.showFind)
+		if a.find.open {
+			c.OnShortcut(0, ui.KeyEscape, a.find.hide)
+		}
+	}
 	ui.Column(c).Fill().Children(func() {
 		a.titleBar(c)
 		if a.loading {
@@ -74,21 +81,35 @@ func (a *readerWindow) view(c *ui.Context) {
 			finishImages := a.beginImageFrame(c)
 			defer finishImages()
 			left, prose, _ := readerWidths(c)
+			barTop := float32(8)
+			if c.TitleBar().Height != 0 {
+				barTop += readerTitleBarHeight
+			}
 			ui.Scroll(c).Key(struct {
 				Path     string
 				Revision uint64
 			}{a.path, a.revision}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
-				ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(40, 0, 120, 0).FontWeight(400).Children(func() {
+				top := float32(40)
+				if a.find.open {
+					top = readerFindInset
+				}
+				content := ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(top, 0, 120, 0).FontWeight(400).Children(func() {
 					if properties := a.prepared.frontMatter; properties != nil {
 						readerProperties(c, properties, a.path, prose)
 					}
 					c.Key("document-body")
 					markdown.ViewDocument(c, a.prepared.parsed, a.md)
 					if a.source == "" {
-						ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted)
+						ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted).Unselectable()
 					}
 				})
+				if a.find.open {
+					a.find.highlight(content, a.revision, t.Dark)
+				}
 			})
+			if a.find.open {
+				a.find.bar(c, barTop)
+			}
 		}
 	})
 }
@@ -122,6 +143,8 @@ func (a *readerWindow) loadDocument(refresh bool) {
 	} else {
 		ctx, generation = a.beginLoad()
 		a.scroll = ui.ScrollState{}
+		a.find.reset()
+		a.find.focus = a.find.open
 	}
 	a.performance = readerPerformance{}
 	if diagnostics.Enabled() {

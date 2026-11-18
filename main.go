@@ -38,7 +38,18 @@ func main() {
 			}},
 			mygo.Separator(), {Role: mygo.RoleClose},
 		}},
-		{Label: "编辑", Submenu: []*mygo.MenuItem{{Role: mygo.RoleCopy}, {Role: mygo.RoleSelectAll}}},
+		{Label: "编辑", Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleCopy}, {Role: mygo.RoleSelectAll},
+			mygo.Separator(),
+			{Label: "搜索", Accelerator: "CmdOrCtrl+F", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
+				for _, a := range manager.windows {
+					if a.win == w {
+						w.Update(a.showFind)
+						break
+					}
+				}
+			}},
+		}},
 		{Role: mygo.RoleWindowMenu},
 	}))
 	mygo.App.OnOpenFile(func(path string) { mygo.App.WhenReady(func() { manager.openPath(path, nil) }) })

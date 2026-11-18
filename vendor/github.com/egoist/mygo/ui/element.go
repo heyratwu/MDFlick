@@ -256,6 +256,7 @@ type layoutStyle struct {
 // Common input queries return false or zero for nil or cleared elements;
 // this does not make references to reused storage safe.
 type node struct {
+	matches    *textMatches
 	epoch      uint64
 	key        any
 	valueInput func(*node)

@@ -243,6 +243,15 @@ func reveal(e *node) {
 		e = e.parent
 	}
 	x, y, w, h := e.x, e.y, e.w, e.h
+	var topInset float32
+	if m := e.matches; m != nil && m.current >= 0 && e.tl != nil {
+		start := int(m.starts[m.current])
+		if rects := e.tl.Selection(start, start+m.length); len(rects) > 0 {
+			r := rects[0]
+			x, y, w, h = x+e.contentX()+r.X, y+e.contentY()+r.Y, r.W, r.H
+			topInset = m.topInset
+		}
+	}
 	if r, ok := clientCaret(e); ok {
 		// An app's text field shows its caret: the text it edits may be
 		// taller than the view, as a code editor as high as its lines.
@@ -267,7 +276,12 @@ func reveal(e *node) {
 				// Right to left, offsets count from the right.
 				sx = mx - sx
 			}
-			sy := max(0, min(nearest(st.scrollY, cy, h, p.border[0], p.h-p.border[2]), my))
+			lo := p.border[0]
+			if p.flags&flagScrollY != 0 {
+				lo += topInset
+				topInset = 0
+			}
+			sy := max(0, min(nearest(st.scrollY, cy, h, lo, p.h-p.border[2]), my))
 			if sx != st.scrollX || sy != st.scrollY {
 				st.beginMove(frame)
 				st.wheel = nil // what comes into view takes over from the wheel

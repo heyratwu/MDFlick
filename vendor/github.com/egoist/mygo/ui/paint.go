@@ -743,6 +743,9 @@ func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textS
 	// Content transitions also paint the old layout; only the current text
 	// carries its selection, in the same position, clip and opacity as its glyphs.
 	if e := p.inline; e != nil && e.tl == l {
+		if e.matches != nil && l != nil {
+			p.textMatchBackgrounds(l, x, y, e.matches)
+		}
 		if ed := e.st.editor; ed != nil && e.flags&flagSelectable != 0 && p.rt.textSelectionVisible(e.st) {
 			if a, b := ed.selection(); a != b {
 				for _, r := range l.Selection(a, b) {
