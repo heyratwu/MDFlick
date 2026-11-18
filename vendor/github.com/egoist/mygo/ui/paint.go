@@ -1061,8 +1061,7 @@ func (p *Painter) drawBitmap(img *Bitmap, box Rect, fit Fit, radius [4]float32, 
 		Pixelated: img.pixelated && shrink <= 1})
 }
 
-// scrollbars draws the thumbs of a scroll container whose content
-// overflows it.
+// scrollbars draws the scroll bars of a container whose content overflows it.
 func (p *Painter) scrollbars(e *node) {
 	st := e.st
 	rt := e.c.rt
@@ -1077,7 +1076,7 @@ func (p *Painter) scrollbars(e *node) {
 	dragging := rt.scrollDrag.st == st
 	// A press takes the bars only where the window shows them
 	// (scrollbarPress).
-	st.barsShown = hovered || dragging
+	st.barsShown = hovered || dragging || e.matchBar != nil
 	if !st.barsShown {
 		return
 	}
@@ -1094,11 +1093,17 @@ func (p *Painter) scrollbars(e *node) {
 	}
 	g := scrollBars(Rect{e.x, e.y, e.w, e.h}, e.barInset, float32(w), float32(h), float32(x), float32(y), e.flags, theme.scrollbarWidth(), e.rtl())
 	if g.vertical {
+		if e.matchBar != nil {
+			p.Fill(g.vTrack, theme.Surface, 0)
+		}
 		bar := g.v
 		if dragging && !rt.scrollDrag.horizontal {
 			bar.X, bar.W = bar.X-2, bar.W+2
 		}
 		p.fill(bar, [4]float32{bar.W / 2, bar.W / 2, bar.W / 2, bar.W / 2}, color, 0, Color{})
+		if e.matchBar != nil {
+			e.matchBar.paint(p, e, g.vTrack)
+		}
 	}
 	if g.horizontal {
 		bar := g.h

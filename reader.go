@@ -35,7 +35,9 @@ type readerWindow struct {
 }
 
 func (a *readerWindow) view(c *ui.Context) {
-	t := c.Theme()
+	t := *c.Theme()
+	t.Scrollbar.A -= t.Scrollbar.A / 4
+	c.SetTheme(&t)
 	if a.prepared.parsed != nil {
 		c.OnShortcut(ui.Cmd, ui.KeyF, a.showFind)
 		if a.find.open {
@@ -85,10 +87,14 @@ func (a *readerWindow) view(c *ui.Context) {
 			if c.TitleBar().Height != 0 {
 				barTop += readerTitleBarHeight
 			}
-			ui.Scroll(c).Key(struct {
+			scroll := ui.Scroll(c).Key(struct {
 				Path     string
 				Revision uint64
-			}{a.path, a.revision}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background)).Children(func() {
+			}{a.path, a.revision}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background))
+			if a.find.open {
+				scroll.SearchScrollbar(ui.Hex("#DDA600"), ui.Hex("#F58119"))
+			}
+			scroll.Children(func() {
 				top := float32(40)
 				if a.find.open {
 					top = readerFindInset

@@ -9,7 +9,7 @@
 - `ui/presentation.go`、`ui/runtime.go`、`ui/context.go`：`Context.AfterPresent` 在最终构建 pass 的帧提交到 surface 后执行一次回调。窗口尚未实际提交时不报告；回调不在绘制函数内执行。
 
 - `ui/markdown/code.go`：未改变的代码块按 revision 复用缓存；`Options.HighlightLimit` 可让大代码块使用可选择的完整纯文本，零值保持无限制高亮。
-- `ui/text_matches.go`、`ui/element.go`、`ui/paint.go`、`ui/scroll.go`：文档搜索遍历渲染后的段落，在原有字形布局下绘制命中背景，并让滚动容器定位到当前命中的文字。
+- `ui/text_matches.go`、`ui/element.go`、`ui/paint.go`、`ui/scroll.go`：文档搜索遍历渲染后的段落，在原有字形布局下绘制命中背景，让滚动容器定位到当前命中，并在搜索期间保持滚动条可见、标出命中的文档位置。
 
 完整补丁在 `patches/mygo-v0.7.3.patch`。vendor 中的其余第三方源码保持 `go mod vendor` 原样，许可证随源码保留。源码纳入仓库不等于向二进制添加框架功能或另一个运行时。
 

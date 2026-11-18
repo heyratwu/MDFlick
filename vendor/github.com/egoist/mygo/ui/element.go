@@ -408,6 +408,7 @@ type node struct {
 	// barInset moves a scroll container's scroll bars in from its edges
 	// (ScrollbarInsets): top, right, bottom, left.
 	barInset [4]float32
+	matchBar *matchScrollbar
 	// scrollBase is the offset of a List's content that its rows were
 	// placed at: placing moves them by how far the offset moved since.
 	scrollBase float64

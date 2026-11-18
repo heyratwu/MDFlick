@@ -131,7 +131,7 @@ func (s *readerFind) bar(c *ui.Context, top float32) {
 		c.OnShortcut(0, ui.KeyF3, func() { s.move(1) })
 		c.OnShortcut(ui.Shift, ui.KeyF3, func() { s.move(-1) })
 	}
-	ui.Row(c).Key("document-find").Absolute().Top(top).Right(14).
+	ui.Row(c).Key("document-find").Absolute().Top(top).Right(20).
 		Width(384).Height(48).Padding(0, 10).Gap(6).AlignItems(ui.Center).
 		Role(ui.RoleToolbar).Label("在文档中搜索").Background(t.Surface).
 		Border(1, t.Border).Radius(8).Shadow(0, 4, 10, 0, ui.RGBA(0, 0, 0, .24)).Children(func() {

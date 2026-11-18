@@ -468,11 +468,9 @@
  		if found && c == '\uFFFC' && objects[k].end <= len(src) {
  			b.WriteString(src[objects[k].src:objects[k].end])
  		} else {
-diff --git a/vendor/github.com/egoist/mygo/ui/element.go b/vendor/github.com/egoist/mygo/ui/element.go
-index dfa566d..8f2a586 100644
 --- a/vendor/github.com/egoist/mygo/ui/element.go
 +++ b/vendor/github.com/egoist/mygo/ui/element.go
-@@ -256,6 +256,7 @@ type layoutStyle struct {
+@@ -256,6 +256,7 @@
  // Common input queries return false or zero for nil or cleared elements;
  // this does not make references to reused storage safe.
  type node struct {
@@ -480,11 +478,17 @@ index dfa566d..8f2a586 100644
  	epoch      uint64
  	key        any
  	valueInput func(*node)
-diff --git a/vendor/github.com/egoist/mygo/ui/paint.go b/vendor/github.com/egoist/mygo/ui/paint.go
-index 6a1e95c..69d38c8 100644
+@@ -407,6 +408,7 @@
+ 	// barInset moves a scroll container's scroll bars in from its edges
+ 	// (ScrollbarInsets): top, right, bottom, left.
+ 	barInset [4]float32
++	matchBar *matchScrollbar
+ 	// scrollBase is the offset of a List's content that its rows were
+ 	// placed at: placing moves them by how far the offset moved since.
+ 	scrollBase float64
 --- a/vendor/github.com/egoist/mygo/ui/paint.go
 +++ b/vendor/github.com/egoist/mygo/ui/paint.go
-@@ -743,6 +743,9 @@ func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textS
+@@ -743,6 +743,9 @@
  	// Content transitions also paint the old layout; only the current text
  	// carries its selection, in the same position, clip and opacity as its glyphs.
  	if e := p.inline; e != nil && e.tl == l {
@@ -494,6 +498,43 @@ index 6a1e95c..69d38c8 100644
  		if ed := e.st.editor; ed != nil && e.flags&flagSelectable != 0 && p.rt.textSelectionVisible(e.st) {
  			if a, b := ed.selection(); a != b {
  				for _, r := range l.Selection(a, b) {
+@@ -1058,8 +1061,7 @@
+ 		Pixelated: img.pixelated && shrink <= 1})
+ }
+ 
+-// scrollbars draws the thumbs of a scroll container whose content
+-// overflows it.
++// scrollbars draws the scroll bars of a container whose content overflows it.
+ func (p *Painter) scrollbars(e *node) {
+ 	st := e.st
+ 	rt := e.c.rt
+@@ -1074,7 +1076,7 @@
+ 	dragging := rt.scrollDrag.st == st
+ 	// A press takes the bars only where the window shows them
+ 	// (scrollbarPress).
+-	st.barsShown = hovered || dragging
++	st.barsShown = hovered || dragging || e.matchBar != nil
+ 	if !st.barsShown {
+ 		return
+ 	}
+@@ -1091,11 +1093,17 @@
+ 	}
+ 	g := scrollBars(Rect{e.x, e.y, e.w, e.h}, e.barInset, float32(w), float32(h), float32(x), float32(y), e.flags, theme.scrollbarWidth(), e.rtl())
+ 	if g.vertical {
++		if e.matchBar != nil {
++			p.Fill(g.vTrack, theme.Surface, 0)
++		}
+ 		bar := g.v
+ 		if dragging && !rt.scrollDrag.horizontal {
+ 			bar.X, bar.W = bar.X-2, bar.W+2
+ 		}
+ 		p.fill(bar, [4]float32{bar.W / 2, bar.W / 2, bar.W / 2, bar.W / 2}, color, 0, Color{})
++		if e.matchBar != nil {
++			e.matchBar.paint(p, e, g.vTrack)
++		}
+ 	}
+ 	if g.horizontal {
+ 		bar := g.h
 diff --git a/vendor/github.com/egoist/mygo/ui/scroll.go b/vendor/github.com/egoist/mygo/ui/scroll.go
 index c13db51..3599fc4 100644
 --- a/vendor/github.com/egoist/mygo/ui/scroll.go
@@ -528,12 +569,9 @@ index c13db51..3599fc4 100644
  			if sx != st.scrollX || sy != st.scrollY {
  				st.beginMove(frame)
  				st.wheel = nil // what comes into view takes over from the wheel
-diff --git a/vendor/github.com/egoist/mygo/ui/text_matches.go b/vendor/github.com/egoist/mygo/ui/text_matches.go
-new file mode 100644
-index 0000000..fc0b325
 --- /dev/null
 +++ b/vendor/github.com/egoist/mygo/ui/text_matches.go
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,158 @@
 +package ui
 +
 +import (
@@ -580,6 +618,77 @@ index 0000000..fc0b325
 +func (e Element) HighlightMatches(starts []uint32, length, current int, color, active Color, topInset float32) {
 +	if n := e.node(); n != nil && len(starts) > 0 && n.kind == kindText && !n.isInline() {
 +		n.matches = &textMatches{starts, length, current, color, active, topInset}
++	}
++}
++
++type matchScrollbar struct{ normal, active Color }
++
++// SearchScrollbar keeps overflowing scroll bars visible and marks the
++// document positions of descendant text highlights on the vertical track.
++func (e Element) SearchScrollbar(normal, active Color) Element {
++	if n := e.node(); n != nil && n.flags&flagScrollY != 0 {
++		n.matchBar = &matchScrollbar{normal, active}
++	}
++	return e
++}
++
++func (bar *matchScrollbar) paint(p *Painter, scroll *node, track Rect) {
++	height := min(float32(2), track.H)
++	if height <= 0 {
++		return
++	}
++	// Paint at most one normal marker at each device-pixel row. The active
++	// mark goes last so it remains visible when many results share a row.
++	travel := track.H - height
++	rows := make([]bool, int(round(travel*p.scale))+1)
++	active := -1
++	origin := scroll.y - float32(scroll.st.scrollY-scroll.scrollBase)
++	var visit func(*node)
++	visit = func(n *node) {
++		if n.hidden || n.leaving != 0 || n.flags&(flagInvisible|flagAbsolute) != 0 {
++			return
++		}
++		if m := n.matches; m != nil && n.tl != nil {
++			starts := m.starts
++			first := 0
++			top := n.y + n.contentY() - origin
++			for _, line := range n.tl.Lines {
++				if first == len(starts) {
++					break
++				}
++				if int(starts[first]) >= line.End {
++					continue
++				}
++				end := first + sort.Search(len(starts)-first, func(i int) bool {
++					return int(starts[first+i]) >= line.End
++				})
++				fraction := (top + line.Y + line.Height/2) / float32(scroll.contentH)
++				row := int(round(travel * p.scale * max(0, min(fraction, 1))))
++				if m.current >= first && m.current < end {
++					active = row
++				} else {
++					rows[row] = true
++				}
++				first = end
++			}
++		}
++		for child := n.first; child != nil; child = child.next {
++			visit(child)
++		}
++	}
++	for child := scroll.first; child != nil; child = child.next {
++		visit(child)
++	}
++	paintRow := func(row int, color Color) {
++		p.Fill(Rect{track.X + 1, track.Y + float32(row)/p.scale, track.W - 2, height}, color, 0)
++	}
++	for row, marked := range rows {
++		if marked {
++			paintRow(row, bar.normal)
++		}
++	}
++	if active >= 0 {
++		paintRow(active, bar.active)
 +	}
 +}
 +

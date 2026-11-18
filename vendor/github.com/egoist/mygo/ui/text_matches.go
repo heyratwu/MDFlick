@@ -47,6 +47,77 @@ func (e Element) HighlightMatches(starts []uint32, length, current int, color, a
 	}
 }
 
+type matchScrollbar struct{ normal, active Color }
+
+// SearchScrollbar keeps overflowing scroll bars visible and marks the
+// document positions of descendant text highlights on the vertical track.
+func (e Element) SearchScrollbar(normal, active Color) Element {
+	if n := e.node(); n != nil && n.flags&flagScrollY != 0 {
+		n.matchBar = &matchScrollbar{normal, active}
+	}
+	return e
+}
+
+func (bar *matchScrollbar) paint(p *Painter, scroll *node, track Rect) {
+	height := min(float32(2), track.H)
+	if height <= 0 {
+		return
+	}
+	// Paint at most one normal marker at each device-pixel row. The active
+	// mark goes last so it remains visible when many results share a row.
+	travel := track.H - height
+	rows := make([]bool, int(round(travel*p.scale))+1)
+	active := -1
+	origin := scroll.y - float32(scroll.st.scrollY-scroll.scrollBase)
+	var visit func(*node)
+	visit = func(n *node) {
+		if n.hidden || n.leaving != 0 || n.flags&(flagInvisible|flagAbsolute) != 0 {
+			return
+		}
+		if m := n.matches; m != nil && n.tl != nil {
+			starts := m.starts
+			first := 0
+			top := n.y + n.contentY() - origin
+			for _, line := range n.tl.Lines {
+				if first == len(starts) {
+					break
+				}
+				if int(starts[first]) >= line.End {
+					continue
+				}
+				end := first + sort.Search(len(starts)-first, func(i int) bool {
+					return int(starts[first+i]) >= line.End
+				})
+				fraction := (top + line.Y + line.Height/2) / float32(scroll.contentH)
+				row := int(round(travel * p.scale * max(0, min(fraction, 1))))
+				if m.current >= first && m.current < end {
+					active = row
+				} else {
+					rows[row] = true
+				}
+				first = end
+			}
+		}
+		for child := n.first; child != nil; child = child.next {
+			visit(child)
+		}
+	}
+	for child := scroll.first; child != nil; child = child.next {
+		visit(child)
+	}
+	paintRow := func(row int, color Color) {
+		p.Fill(Rect{track.X + 1, track.Y + float32(row)/p.scale, track.W - 2, height}, color, 0)
+	}
+	for row, marked := range rows {
+		if marked {
+			paintRow(row, bar.normal)
+		}
+	}
+	if active >= 0 {
+		paintRow(active, bar.active)
+	}
+}
+
 func (p *Painter) textMatchBackgrounds(l *text.Layout, x, y float32, m *textMatches) {
 	for li := range l.Lines {
 		line := &l.Lines[li]
