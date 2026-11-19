@@ -2,8 +2,8 @@
 
 `mygo build` turns a project into apps people install: an app bundle and a
 disk image on macOS, an executable and an installer on Windows, an
-executable, a desktop entry, an archive with its install script, a Debian
-package and a PKGBUILD for Arch Linux on Linux.
+executable, a desktop entry, an archive with its install script, Debian
+and RPM packages and a PKGBUILD for Arch Linux on Linux.
 
 ```sh
 bun run build        # mygo build, in a project with a web frontend
@@ -46,7 +46,7 @@ when cross-compiling, set `CC` to a suitable cross compiler.
 |---|---|
 | macOS | `My App.app`, signed, and `my-app-0.1.0-arm64.dmg` (`my-app-0.1.0.dmg` for `darwin/universal`), with [updates](updates.md) also `install.sh` |
 | Windows | `My App.exe`, the files of the app, and the installer `my-app-setup-0.1.0-amd64.exe`, with [updates](updates.md) also [`install.ps1`](#install-scripts-for-macos-and-windows) |
-| Linux | `my-app`, `my-app.desktop`, `my-app.png`, `my-app.xml` for the file types the app defines, the files of the app, their archive `my-app-0.1.0-linux-amd64.tar.gz` with [`install.sh`](#the-install-script), the Debian package `my-app_0.1.0_amd64.deb`, and a [`PKGBUILD`](#arch-linux) with the icons it installs, `my-app-256x256.png` and `my-app-512x512.png` |
+| Linux | `my-app`, `my-app.desktop`, `my-app.png`, `my-app.xml` for the file types the app defines, the files of the app, their archive `my-app-0.1.0-linux-amd64.tar.gz` with [`install.sh`](#the-install-script), and the packages of [`linux.formats`](#linux), by default all three: the Debian package `my-app_0.1.0_amd64.deb`, the RPM package `my-app-0.1.0-1.x86_64.rpm`, and a [`PKGBUILD`](#arch-linux) with the icons it installs, `my-app-256x256.png` and `my-app-512x512.png` |
 
 Other flags: `-debug` keeps development features such as the inspector,
 `-skip-dmg`, `-skip-notarize` and `-skip-installer` (the Windows
@@ -119,7 +119,8 @@ This writes `icon/Assets.car`, for `macos: { icon: "icon/Assets.car" }`.
 
 Files the app reads at run time, such as a database seed, a helper binary
 or the images of a tray icon, ship with it. Everything in the `resources`
-directory of the project is copied into the app, as are the files and
+directory of the project is copied into the app, but Go sources and what
+[`resourcesExclude`](#leaving-files-out) leaves out, as are the files and
 directories listed in `resources` in the configuration, under their base names:
 
 ```ts
@@ -138,7 +139,39 @@ seed := filepath.Join(dir, "seed.db")
 ```
 
 `mygo dev` copies them into the development app too, and rebuilds it when
-they change. Hidden files are left out.
+they change. A dotfile inside a resource directory ships: packages read
+such names, as dsh's provider catalog reads
+`dist/providers/data/.manifest.json`. Hidden directories (`.git`, `.cache`)
+are left out, and so are `.DS_Store`, `Thumbs.db` and `desktop.ini`, and
+the top-level entries of `resources` whose names start with a dot, which
+belong to the repository rather than the app. A dotfile you would rather
+not ship, such as a `.env` beside a resource, is left out with
+[`resourcesExclude`](#leaving-files-out).
+
+### Leaving files out
+
+Go source files in `resources` are left out of the apps: builds read
+them, such as a package that embeds the images beside it with
+`//go:embed`, and apps never do. Other files that only the project needs,
+such as design files, are left out with `resourcesExclude`, patterns of
+their paths in `resources`:
+
+```ts
+export default defineConfig({
+  resourcesExclude: ["**/*.psd", "design"],
+});
+```
+
+Each segment of a pattern, between slashes, matches as in Go's
+`path.Match` (`*`, `?`, `[a-z]`), and `**` matches any number of
+directories, none included: `**/*.psd` leaves out every `.psd` file,
+`*.psd` only those at the top of `resources`. A directory that matches is
+left out with what it holds, so `design` and `design/**` both leave out
+`resources/design`. Paths in [platform directories](#platform-resources)
+start with the directory's name, as in `linux-amd64/bin/server.pdb`, which
+`**/*.pdb` matches too. Builds and `mygo dev` leave out the same files.
+The files and directories listed in `resources` ship whole, Go sources
+included.
 
 ### Platform resources
 
@@ -291,11 +324,25 @@ Store the credentials of the notary service in the keychain once:
 xcrun notarytool store-credentials notary
 ```
 
-`mygo build` then signs the app with the hardened runtime, submits the disk
-image to the notary service, and staples the ticket to the disk image and
-to the app, which updates ship. `security
+`mygo build` then signs the app with the hardened runtime, submits the app
+to the notary service and staples its ticket to it, then does the same for
+the disk image, which holds the stapled app. Updates ship the stapled app
+too. `security
 find-identity -v -p codesigning` lists your identities, and `mygo doctor`
 counts the Developer IDs.
+
+`codesign` asks for what it lacks in a dialog on the Mac's screen: the
+password of a locked keychain, or leave to use the identity's key. It
+waits for the answer as long as it takes, so a build that nobody watches,
+behind a locked screen, over SSH or in CI, stops there. After 15 seconds
+`mygo build` and `mygo dev` say that `codesign` may be waiting. Where
+nobody can answer, unlock the keychain before the build and let `codesign`
+use the key, as the [workflow for GitHub Actions](github-actions.md) does:
+
+```sh
+security unlock-keychain ~/Library/Keychains/login.keychain-db
+security set-key-partition-list -S apple-tool:,apple: -s ~/Library/Keychains/login.keychain-db
+```
 
 ### Info.plist and entitlements
 
@@ -345,8 +392,10 @@ The profile must match the signing certificate, bundle identifier and
 entitlements, including the application and team identifiers. MyGo embeds
 it as supplied; it does not create profiles or derive entitlements from
 them. Apple validates their authorization when the app runs. A profile
-cannot be used with ad-hoc signing (`-sign -`). `dev` signs ad hoc unless
-it is given `-sign` (it does not use `macos.signingIdentity`), and its app's
+cannot be used with ad-hoc signing (`-sign -`). `dev` signs with an Apple
+Development identity, or ad hoc without one, unless it is given `-sign` (it
+does not use `macos.signingIdentity`), and with a profile but no `-sign` ad
+hoc; its app's
 identifier is `<identifier>.dev`, which the app's profile does not
 authorize: leave the profile and the restricted entitlements out of
 development builds with a [computed configuration](configuration.md#computed-configuration),
@@ -524,8 +573,8 @@ export default defineConfig({
 
 `mygo build` writes the executable, named after the app's
 [`slug`](configuration.md#the-app), which is its name in lower case by
-default, a desktop entry and the icon, and a Debian package, which
-installs the app in `/opt/my-app` with its desktop entry, icons, URL
+default, a desktop entry and the icon, and Debian and RPM packages, which
+install the app in `/opt/my-app` with its desktop entry, icons, URL
 schemes and file types:
 
 ```ts
@@ -534,38 +583,68 @@ export default defineConfig({
     maintainer: "Jane Doe <jane@example.com>",
     comment: "Take notes",
     categories: ["Office"],
-    depends: ["libayatana-appindicator3-1"],
+    depends: {
+      deb: ["libayatana-appindicator3-1"],
+      rpm: ["libayatana-appindicator-gtk3"],
+      arch: ["libayatana-appindicator"],
+    },
     command: "my-app",
   },
 });
 ```
 
-The package depends on GTK 3 and WebKitGTK; `depends` adds more packages.
+The packages depend on GTK 3 and WebKitGTK; `depends` adds more packages
+for each format (`deb`, `rpm` and `arch`), or takes a list of Debian
+packages, as `["libayatana-appindicator3-1"]`, mapped to the Arch Linux and
+RPM packages MyGo knows.
 An app that shows no web page, in a window or a `ui.WebView`, as an app of
 [native UI](native.md), needs GTK alone: `webview: false` leaves WebKitGTK
-out of its package, and out of what `install.sh` and `mygo doctor` (in the
+out of its packages, and out of what `install.sh` and `mygo doctor` (in the
 project) check, as the app never loads it.
 `maintainer` defaults to the `author` of package.json, else the name of
 the app.
-`comment` describes the app in its desktop entry and package, and
+`comment` describes the app in its desktop entry and packages, and
 `categories` places it in application menus (`Utility` by default).
 The app opens from the applications menu. `command` also gives it a
-command, `/usr/bin/my-app` from the package and `~/.local/bin/my-app` from
+command, `/usr/bin/my-app` from the packages and `~/.local/bin/my-app` from
 [`install.sh`](#the-install-script), or several, as `["my-app", "ma"]`,
 which adds a short name; without it, neither adds a command, which leaves
 the name to a command-line tool of the same name, such as the app's own.
 
+`formats` chooses the packages a build writes, of `deb`, `rpm` and
+`pkgbuild`, all three by default; a name it does not know is an error.
+The archive with [`install.sh`](#the-install-script) is always written:
+`install.sh` installs and [updates](updates.md) the app from it, and the
+PKGBUILD packages it. `formats: ["deb"]` writes the Debian package and
+the archive, and `formats: []` the archive alone. `SHA256SUMS` and
+`-upload` take only what the build wrote, and the build warns only about
+the `depends` of the packages it writes.
+
+```ts
+export default defineConfig({
+  linux: { formats: ["deb", "rpm"] },
+});
+```
+
+The desktop entry names the window class of the app, `StartupWMClass`,
+as the executable of `command`: an X11 session groups the window with the
+entry and shows its icon in the taskbar, where Wayland matches the same
+name as the app id. Started by a command of another name than its slug, as
+`ma`, the app is the same program: its windows have that class, and its
+pages the data they kept, as `localStorage`.
+
 Keep the slug of a released app. Its Linux files are named after it, and
 an update replaces the files of the same names: one to a version with
 another slug leaves the old executable in place, which the desktop entry
-that `install.sh` registered still runs, and the Debian package of the
+that `install.sh` registered still runs, and a Debian or RPM package of the
 new slug is another package, installed next to the old one. Choose the
 slug before the first release, as `cloud-music` for `云音乐`, whose own
 would be `yun-yin-le`.
 
 ### Arch Linux
 
-Next to the archive, every Linux build also gets a `PKGBUILD`, from which
+Next to the archive, every Linux build also gets a `PKGBUILD`, unless
+[`linux.formats`](#linux) leaves it out, from which
 `makepkg` packages the archive for Arch Linux, checked against its
 SHA-256, and installs it with pacman:
 
@@ -587,8 +666,8 @@ the archive holds the original. Its fields come from the configuration:
 | `pkgdesc` | `linux.comment`, else the name |
 | `arch` | `x86_64` of amd64, `aarch64` of arm64 |
 | `url` | `homepage` in package.json, else the repository of `updates.github` |
-| `license` | `license` in package.json, else `LicenseRef-custom` |
-| `depends` | `gtk3` and, unless `linux.webview` is `false`, `webkit2gtk-4.1`, then the Arch Linux packages of `linux.depends` that MyGo knows, as `libnotify` of `libnotify4`; the build warns about a Debian package it knows no Arch Linux package for, and leaves it out |
+| `license` | `license` in mygo.json, else in package.json, else `LicenseRef-custom` |
+| `depends` | `gtk3` and, unless `linux.webview` is `false`, `webkit2gtk-4.1`, then `linux.depends.arch`, or when `linux.depends` is a list of Debian packages, the Arch Linux packages of those MyGo knows, as `libnotify` of `libnotify4`; the build warns about a Debian package it knows no Arch Linux package for, and leaves it out |
 
 `-upload` leaves the PKGBUILD out: it packages the archive next to it, and
 every architecture has its own. Copy it, with the icons, next to the
@@ -641,7 +720,7 @@ command that installs it on Debian, Ubuntu, Fedora, Arch and openSUSE,
 unless `linux.webview` is `false`.
 When the app updates itself, it registers the desktop entry and file types
 of the new version, so a version that adds URL schemes or file types gets
-them. The Debian package suits people who want the system's package manager to
+them. The Debian and RPM packages suit people who want the system's package manager to
 update the app; `install.sh` suits the others, and is the Linux install
 that updates itself.
 
@@ -753,7 +832,7 @@ property list in XML.
 [deep links](app.md#deep-links) and [file associations](app.md#file-associations))
 are registered by each package: in the macOS app's `Info.plist`, by the
 Windows installer, and by the Linux desktop entry, install script,
-Debian package and PKGBUILD.
+Debian and RPM packages and PKGBUILD.
 
 ## Publishing
 

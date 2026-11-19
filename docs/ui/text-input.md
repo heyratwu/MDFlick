@@ -35,6 +35,10 @@ ui.TextArea(c, &app.notes).Height(160)
 - `ReadOnly(true)` shows the text without letting the user change it: it
   still takes the focus, without a caret, and its text can be selected and
   copied.
+- `MaxLength(n)` keeps the user from making the text longer than n, counted
+  as HTML's `maxlength` counts it, in UTF-16 code units: what is typed,
+  pasted or committed by an input method is cut to what fits. A value the app
+  sets is not cut, and n <= 0 means no limit.
 - `Disabled(true)` grays it out.
 - `OnPaste(fn)` sees a paste (Cmd+V or Ctrl+V, the Edit menu's or the
   context menu's Paste) before it is inserted, with the clipboard's text,
@@ -133,7 +137,7 @@ lines, as a log or a source file, and stays as quick to type in.
 ## Editing
 
 Text inputs edit as the platform's text fields do: selection with the
-pointer (a double click selects a word, a triple click a line), with Shift
+pointer (a double click selects a word, a triple click a paragraph), with Shift
 and the arrows, and by words and lines with the platform's keys; undo and
 redo; cut, copy and paste, also from the Edit menu's roles; and a context
 menu of the editing commands. They take text composed with input methods,
@@ -141,11 +145,72 @@ which see the text around the caret, so that press and hold, Japanese
 conversion and predictions work as in other apps. The keys typed while an
 input method composes are its own, as Enter choosing a candidate or Escape
 giving the composition up: they submit nothing, press no shortcut and
-close no dialog. `Composing` reports whether it composes, its text not yet
-in the string.
+close no dialog. Each platform's input method takes them before the app
+does, and a `Tester` takes them as it does, so `Compose` then `Key` shows
+what users get. Chords with Ctrl or Command that the input method leaves
+go to shortcuts as at any time. `Composing` reports
+whether it composes, its text not yet in the string.
 
 The input keeps the text being edited, its selection and its undo history
 from frame to frame; setting the string from elsewhere replaces the text.
+It preserves the last undo step, so an app can reformat what the user
+typed without losing that step. Setting the string to `""` does not discard
+the history: Undo can restore text from before the clear.
+
+To put a text of the app's in place of some or all of the user's, call
+`ReplaceText(start, end, s)` on the input instead. It replaces the runes
+from `start` to `end`, as one step of undo of its own, so Undo brings back
+what the user had written and Redo the app's text again. The offsets are
+kept within the text, so `0, math.MaxInt` replaces all of it, even text
+typed in the same frame:
+
+```go
+msg := ui.TextArea(c, &app.message).Label("Message")
+if text, ok := app.generated(); ok {
+	msg.ReplaceText(0, math.MaxInt, text) // Undo restores what the user wrote
+}
+
+in := ui.TextInput(c, &app.draft)
+if name, ok := app.mentionPicked(); ok {
+	_, caret := in.TextSelection()
+	in.ReplaceText(app.mentionStart, caret, "@"+name+" ")
+}
+```
+
+`ReplaceText` puts the caret after the text and reports the edit through
+`Changed`, as typing does. A single-line input takes line breaks as
+spaces, and `MaxLength` does not cut it. It works on `TextInputBuffer` and
+`TextAreaBuffer` too.
+
+To start a new editing session, clear the string and change the input's
+[key](views.md#keys). The new identity gets a new editor, without the old
+selection, composition or undo history:
+
+```go
+// Keep secret and secretSession in app state.
+ui.TextInput(c.Key(app.secretSession), &app.secret).Password().Label("Secret")
+
+if ui.Button(c, "Cancel").Clicked() {
+	app.secret = ""
+	app.secretSession++ // the next build creates a fresh editor
+}
+```
+
+For indexed storage, `ui.TextInputBuffer` and `ui.TextAreaBuffer` edit a
+`*ui.TextBuffer`. Replacing its contents externally with `buffer.Set("")`
+discards the control's undo and redo history and composition when it next
+synchronizes with the buffer; its selection is clamped to the new text.
+Neither changing a key nor replacing a buffer guarantees that old text is
+erased from memory; existing `TextSnapshot` values retain their contents.
+
+A single-line input replaces line breaks in pasted text with spaces. Use
+`OnPaste` to reject a multiline value before it is changed or inserted:
+
+```go
+ui.TextInput(c, &app.secret).Password().OnPaste(func(text string) bool {
+	return strings.ContainsAny(text, "\r\n") // import "strings"
+})
+```
 
 ## The caret
 

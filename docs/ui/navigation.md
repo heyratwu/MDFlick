@@ -90,6 +90,13 @@ whose right click lists the pages to go back or forward to, by their
 titles. The keys go to the router holding the keyboard focus, else to the
 first of the window.
 
+On phones, `router.SystemStack = true` shows the history as the system's
+own stack of screens, under its navigation bar with each page's title and
+a back button: UIKit moves the pages on iOS, with its swipe from the left
+edge, and Android shows Material's toolbar over them. `InSystemStack`
+tells the view to show no bar of its own then (see
+[Interfaces on phones](../mobile/interface.md#tabs-and-stacks)).
+
 In a [browser](browsers.md), the first router a window shows follows the
 tab's history, in the URL's fragment (`#/notes/42`): going to a page adds
 an entry to the browser's history, its back and forward buttons go through
@@ -153,9 +160,17 @@ in. With less motion asked of the desktop, all fade, and
 `router.Transition = ui.TransitionNone` shows them at once. The page going
 away takes neither the pointer nor the keyboard as it slides.
 
+`router.Transition = ui.TransitionMatch` fades the page going away out as
+the page coming fades in, while the elements of a
+[`Match`](transitions.md#shared-elements) in both move from the one to the
+other, as Keynote's Magic Move: a photo's thumbnail opening into its page.
+Those that fly (`Fly`) go over both pages, the element of the page going
+away going with the one coming, fading out, and showing no more once
+there.
+
 `router.Animation` sets how pages move, as a spring or a curve (see
-[Motion](motion.md)), in place of easing out over 250 ms as they slide and
-150 ms as they fade:
+[Motion](motion.md)), in place of easing out over 250 ms as they slide,
+150 ms as they fade, and 300 ms as they fade into each other:
 
 ```go
 router.Animation = &ui.Snappy

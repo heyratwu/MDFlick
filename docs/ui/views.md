@@ -162,8 +162,25 @@ pointer keys the object it points to, whatever the object holds, so an
 item's pointer serves as its key as well as an ID does. A key Go cannot
 compare, as a slice, or not equal to itself, as a NaN, compares by its
 value printed. `Element.Key` can
-key a container before its children or local state are built. Use
-`Context.Key` for stateful controls and custom base widgets.
+key a container before its state is read or bound (`Local`, `Clicked`,
+`Hovered`, `Focused`, `OnUnmount`, `AnimateTo`, and the like); calling it
+afterward logs a warning in apps and panics in `Tester`. Use `Context.Key`
+before construction for stateful controls and custom widgets.
+
+`Context.Key` sets one pending key for the next control; calling it again
+replaces that key. `c.Key("account").Key("secret")` uses only `"secret"`.
+Create a keyed parent to give its children a separate identity scope:
+
+```go
+ui.Column(c.Key(app.accountID)).Children(func() {
+	ui.TextInput(c.Key("secret"), &app.secret).Password()
+})
+```
+
+Changing the account ID gives the input a new identity, even though its
+own key stays `"secret"`. Within the same account, that input keeps its
+state from build to build. The new editor starts with `app.secret`; clear
+or load that model value separately when switching accounts.
 
 ## Change the state from other goroutines
 
@@ -183,10 +200,61 @@ go func() {
 Within the view, `c.Invalidate()` asks for another frame and `c.After(d)` for
 one after a delay, such as a clock's next second.
 
+`Update` builds the view again after every call, whether the function
+changed the state or not. A goroutine that polls data that rarely
+changes, as a connection count or a status, compares it on the main thread
+with `mygo.RunOnMain`, which draws nothing, and calls `Invalidate` only
+when it changed:
+
+```go
+for n := range counts {
+	mygo.RunOnMain(func() {
+		if n != app.connections {
+			app.connections = n
+			win.Invalidate()
+		}
+	})
+}
+```
+
 ## State of an element
 
 An element keeps state of its own from frame to frame with `ui.Local`, for
-widgets you build yourself; see [custom widgets](custom-widgets.md).
+widgets you build yourself; see [custom widgets](custom-widgets.md). A
+value of it that is an `io.Closer` closes when the element is no longer
+built, which stops the work the widget started
+([stopping what a widget started](custom-widgets.md#stopping-what-a-widget-started)).
+
+A view that only needs to run a function as an element goes, such as the
+`cancel` of a streaming request, a ticker or a subscription it started,
+gives it to `OnUnmount` instead of defining a type with `Close`:
+
+```go
+func Feed(c *ui.Context, win *mygo.Window, app *App, url string) {
+	e := ui.Column(c)
+	cancel := ui.Local(e, "stream", func() context.CancelFunc {
+		ctx, cancel := context.WithCancel(context.Background())
+		go read(ctx, url, func(line string) {
+			win.Update(func() { app.lines = append(app.lines, line) })
+		})
+		return cancel
+	})
+	e.OnUnmount(*cancel)
+	e.Children(func() {
+		for _, line := range app.lines {
+			ui.Text(c, line)
+		}
+	})
+}
+```
+
+The function runs as a `Local`'s `Close` does: once, on the main thread,
+after the first frame that no longer builds the element, as the view
+switches to another screen, a list's row scrolls out of view or a popover
+closes. An element leaving with an exit transition runs it once its exit
+ended, and every element runs it as its window closes. Call `OnUnmount`
+as the element is built, after `Key`: each call replaces the function,
+and the last one given runs; a nil function takes it away.
 
 ## Check build lifetimes
 

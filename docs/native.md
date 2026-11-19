@@ -44,7 +44,24 @@ mygo.Dialog.Error("Import failed", err.Error())
 ```
 
 `OpenDialogOptions` also pick directories (`Directory`), show hidden files
-and, on macOS, a message and a New Folder button.
+and, on macOS, a message and a New Folder button. On Windows, choosing a
+library, such as Documents, in a directory picker picks the folder it saves
+to.
+
+A filter takes files by type too, as HTML's `accept`: `MIMETypes` such as
+`"application/pdf"`, or all of a kind, `"image/*"`, which the system's
+picker matches as it knows them, rather than a list of every extension:
+
+```go
+mygo.FileFilter{Name: "Pictures", MIMETypes: []string{"image/*"}}
+```
+
+macOS 11 and later take them as types of files (`UTType`), the kinds
+`image/*`, `audio/*`, `video/*`, `text/*` and `font/*` as theirs
+(`public.image` and the others), which is all earlier versions take; GTK
+matches them, wildcards too; Windows filters by the extensions its
+registry gives the type, or every type of the kind and every file its
+`PerceivedType` says is of it.
 
 In message dialogs Enter activates `DefaultButton` and Escape
 `CancelButton`, also when they are one button, as Cancel above. On macOS
@@ -116,6 +133,26 @@ mygo.NewNotification(mygo.NotificationOptions{
 	Group: "ada",
 	Title: "Ada",
 	Body:  msg.Text,
+}).Show()
+```
+
+`Image` shows an image with the notification, the bytes of a PNG or JPEG,
+such as the cover of the track that started playing. macOS attaches it,
+as a thumbnail that grows as the notification expands; Linux gives the
+desktop's notification service its pixels, scaled down to fit 256 pixels;
+Windows shows it as the balloon's large icon, in place of the app's. An
+image the system cannot decode leaves the notification without one.
+`NewNotification` copies it, so the app can reuse its buffer; MyGo does
+not fetch remote images:
+
+```go
+// One notification for what plays, replaced as the track changes.
+mygo.NewNotification(mygo.NotificationOptions{
+	ID:     "now-playing",
+	Title:  track.Title,
+	Body:   track.Artist + " — " + track.Album,
+	Image:  track.Cover,
+	Silent: true,
 }).Show()
 ```
 
@@ -195,14 +232,22 @@ mygo.Shell.OpenExternal("https://example.com") // the default browser
 mygo.Shell.OpenPath("/Users/ada/report.pdf")   // the default app for the file
 mygo.Shell.ShowItemInFolder(path)              // Finder, Explorer, the file manager
 mygo.Shell.TrashItem(path)                     // to the trash
+mygo.Shell.PreviewItem(path)                   // Quick Look, as the space bar does
 mygo.Shell.Beep()
 ```
 
-`TrashItem` never deletes for good: when the item cannot go to the trash
-it fails and leaves the item where it is. On Windows that is an item too
-big for the recycle bin, or on a drive without one, as network shares and
-many removable drives are, which Windows would otherwise delete without
-asking.
+`TrashItem` fails and leaves the item where it is when it cannot go to
+the trash. On Windows that is an item too big for the recycle bin, or on
+a drive without one, as network shares and many removable drives are,
+which Windows would otherwise delete without asking. In the rare case
+Windows deletes it for good all the same, `TrashItem` fails and says it
+was deleted.
+
+`PreviewItem` shows a file in the Quick Look panel, the preview Finder
+opens with the space bar: the panel stays open until the user closes it,
+and asking again replaces the item it shows. It is macOS only; other
+platforms return `ErrUnsupported`. The panel is not modal: the app keeps
+running and the call returns once the item is set.
 
 `FileIcon` returns the icon the file manager shows for a file, a folder
 or an application, as a PNG of the size asked for in pixels: pass the size
@@ -221,6 +266,15 @@ also name a shell item, such as an app of the Start menu by
 content type from the icon theme, and for a desktop entry (`.desktop`), the
 icon of its application, or where the theme has none, that of desktop
 entries.
+
+`TypeIcon` returns the icon of a file type, by its extension, with or
+without the dot, without a file of that type on disk: the icon of an
+attachment not yet downloaded, say. It is drawn as `FileIcon` draws its
+icon, and fails in browsers.
+
+```go
+png, err := mygo.Shell.TypeIcon("pdf", 64)
+```
 
 `InstalledApps` lists the applications installed on the computer, sorted
 by name, as a launcher shows them, and `LaunchApp` starts one, or brings
@@ -272,6 +326,14 @@ mygo.Screen.OnDisplaysChanged(func() { /* rearrange windows */ })
 ```
 
 `WorkArea` leaves out the menu bar, the Dock and taskbars.
+
+On Windows, displays can have different scales. Each display's
+coordinates start at its top-left corner in pixels divided by the
+smallest scale of the displays, and go on in its own scale, so that
+displays never overlap: one with a larger scale than another's leaves a
+gap after it. Where every display has the same scale, coordinates are
+the pixels divided by that scale. A window's bounds are in the scale of
+the display it is the most on.
 `DisplayMatching(rect)` returns the display a rectangle overlaps most, the
 one a window is on.
 
@@ -339,6 +401,10 @@ is that same JSON, and the generated client types it with mygo-runtime's
 release := mygo.Power.KeepAwake("Exporting the video", false)
 defer release()
 
+// Keep the app at full speed while none of its windows shows.
+stop := mygo.Power.KeepRunning("Serving the phones")
+defer stop()
+
 mygo.Power.OnSuspend(func() { pauseSync() })
 mygo.Power.OnResume(func() { resumeSync() })
 mygo.Power.OnLockScreen(func() { hideSecrets() })
@@ -349,7 +415,19 @@ idle := mygo.Power.IdleTime() // since the last keyboard or mouse input
 ```
 
 The reason given to `KeepAwake` shows where the system lists what keeps it
-awake. On Linux, `OnLockScreen` is called when the screen saver starts,
+awake.
+
+macOS puts an app none of whose windows shows, hidden, minimized, covered
+or behind the locked screen, into App Nap within a minute: it lowers the
+app's priority, coalesces its timers and throttles its I/O, which slows an
+app that serves the network, streams or syncs in the background. A tray
+icon counts as a window that shows while the menu bar shows it.
+`KeepRunning` keeps App Nap off until its release, and lets the computer
+sleep when idle, as an app that stays in the menu bar all day should;
+`KeepAwake` keeps App Nap off too, but the computer awake as well. Other
+systems do nothing for `KeepRunning`.
+
+On Linux, `OnLockScreen` is called when the screen saver starts,
 which usually locks the screen, and `IdleTime` is 0 on desktops that do not
 report it.
 
@@ -400,6 +478,20 @@ defer release()
 `Control` hears the player's end; after the app plays, pauses or seeks it
 itself, `NowPlaying.Sync` shows it. In browsers, `NowPlaying` is the
 page's Media Session.
+
+A track with more than one artist names them in `Artists`, which wins
+over `Artist` when it names any: MPRIS clients list them, and macOS,
+Windows and browsers, which show one artist, show them joined with ", ".
+
+```go
+mygo.NowPlaying.Set(mygo.NowPlayingInfo{
+	Title: "Get Lucky", Artists: []string{"Daft Punk", "Pharrell Williams", "Nile Rodgers"},
+})
+```
+
+On Linux, an MPRIS client can raise the player (`Raise`), as the media
+controls of GNOME and KDE do when it is clicked: the app's window that had
+the keyboard last shows, if hidden, and takes the keyboard.
 
 ## Network
 
@@ -541,7 +633,10 @@ token, err := mygo.Secrets.Service("MyApp").Get("refresh-token")
 Secrets protect against other users and stolen disks, not against other
 apps of the same user: macOS asks the user before another app reads them,
 and before a rebuilt app does when it is not signed with the same
-identity, while Linux and Windows let them read.
+identity, while Linux and Windows let them read. `mygo dev` signs every
+build with the user's Apple Development identity, so "Always Allow" lasts
+across rebuilds; apps signed ad hoc, as without one, with `-sign -` or with
+`go run`, are asked again after each build.
 
 Where there is no credential store, the methods fail with an error for
 which `errors.Is(err, errors.ErrUnsupported)` holds: in browsers, and on
@@ -676,9 +771,33 @@ by the app or, where the system tells, by another app.
 
 On Linux under X11 the app grabs the keys itself. Under Wayland, where apps
 cannot, the desktop binds shortcuts for the app through the XDG desktop
-portal, which KDE Plasma 6 and GNOME 48 and later provide: the desktop may
+portal, which KDE Plasma 6 and GNOME 48 and later provide, and so it does
+for an app that runs on XWayland in a Wayland session (`GDK_BACKEND=x11`),
+whose grabs would get the keys only while it has the focus: the desktop may
 ask the user to confirm new shortcuts and lets them pick other keys, and it
 needs the app installed, since it identifies apps by their desktop entry.
 The shortcut works shortly after `Register` returns. Windows the function
 shows or focuses take the focus with the key press's activation token where
-the desktop provides one, as GNOME does.
+the desktop provides one, as GNOME does; under XWayland they show without
+it on GNOME, which keeps the focus for the window the user is in.
+
+Such a desktop shows the app's shortcuts to the user, where it asks to
+confirm them and in its settings, and the user may decline one, which then
+does nothing, or give it other keys. `RegisterWith` tells the desktop what
+the shortcut does, and tells the app the keys the shortcut got:
+
+```go
+err := mygo.GlobalShortcut.RegisterWith("CmdOrCtrl+Alt+.", mygo.GlobalShortcutOptions{
+	Description: "Stop all",
+	OnKeys: func(keys string) {
+		// "Ctrl+Alt+.", other keys the user picked, or "" for none.
+		stopKeys = keys
+	},
+}, stopAll)
+```
+
+Without a description the desktop shows the accelerator in its place.
+`OnKeys` runs on the main thread once the desktop answered and again when
+the user changes the keys; it gets them as the desktop writes them, so show
+them as they are. Where the app takes the keys itself (macOS, Windows, X11)
+it is not called, and the shortcut has its accelerator's keys.

@@ -87,8 +87,8 @@ What every app has, whether its windows show native UI or web pages.
   navigation, downloads, permissions, printing.
 - [The application](app.md): the lifecycle, quitting, a single instance,
   deep links, file associations, recent documents, starting at login,
-  well-known directories, the jump list, browsing data, cookies and
-  sessions.
+  well-known directories, the jump list, drawing web pages on Linux,
+  browsing data, cookies and sessions.
 - [Menus and the tray](menus.md): application, context and Dock menus,
   keyboard shortcuts and tray icons.
 - [Documents](documents.md): document-based apps, a window per file, with
@@ -100,6 +100,11 @@ What every app has, whether its windows show native UI or web pages.
 - [Desktop APIs](native.md): dialogs, notifications, the clipboard, the
   shell, displays, dark mode, power, the network status, secrets, watching
   files and global shortcuts.
+- [Native modules](native-modules.md) (experimental): Go interfaces implemented in
+  Swift, Kotlin, Rust or Zig, without cgo, for the frameworks and views of
+  macOS, iOS and Android, Rust crates and Zig and C libraries, which the
+  CLI builds, puts into apps and publishes for the users of your Go
+  packages.
 - [Clipboard and drag data](data-transfer.md): multiple representations,
   file lists, custom formats, lazy providers, and clipboard persistence.
 - [Audio](audio.md): sound effects, streamed music and sound an app makes
@@ -123,6 +128,20 @@ components, from buttons to tables.
   typed events and the generated TypeScript client.
 - [Plugins](plugins.md): features that come in a Go package and an npm
   package, such as the official plugins, and writing your own.
+
+## Phones and tablets
+
+- [Phones and tablets](mobile/README.md): the same app on iOS and
+  Android, what you need, developing on a simulator, an emulator or a
+  device, and how apps behave on phones.
+- [Building and publishing for phones](mobile/building.md): signed `.ipa`,
+  `.apk` and `.aab` files, App Store Connect and Google Play, links, icons
+  and launch screens.
+- [Interfaces on phones](mobile/interface.md): the system's tabs and
+  stacks, fingers, the keyboard, the widgets of phones, and testing.
+- [Device APIs and plugins](mobile/plugins.md): haptics, sharing, the
+  battery, the official plugins for maps, the camera, location and more,
+  and writing your own in Swift and Kotlin.
 
 ## Shipping
 
@@ -156,9 +175,17 @@ components, from buttons to tables.
   one standard layout.
 - [Loading](plugins/loading.md): loading.dev's 29 loading indicators for
   native UI.
+- [SF Symbols](plugins/sfsymbols.md): Apple's SF Symbols for native UI on
+  macOS, drawn by the system.
 - [Automation](plugins/automation.md): drive a running app from another
   process, as end-to-end test runners and agents do: its windows,
-  elements, input, menus and screenshots.
+  elements, input, menus and screenshots, and `mygo-automation`, its
+  command line client for agents.
+- [PermissionFlow](plugins/permissionflow.md): the system's permissions,
+  such as Accessibility and Screen Recording, checked and asked for, and a
+  guide to System Settings with the app to drag into its list.
+- [Render](plugins/render.md): videos of native UI, its frames drawn on
+  the GPU and encoded with the system's encoders, with sound.
 
 ## Reference
 
@@ -187,6 +214,8 @@ Apps run on:
 
 An app whose windows all show native UI needs neither WebKitGTK nor the
 WebView2 Runtime. Tray icons on Linux also need `libayatana-appindicator3`.
+On Linux, MyGo turns WebKitGTK's DMA-BUF renderer off unless the app opts
+in, see [drawing web pages on Linux](app.md#drawing-web-pages-on-linux).
 
 An app that shows web pages can ask whether the machine has a webview with
 `mygo.WebViewAvailable()`, also before `App.Run`, and open a window of native UI where it has
