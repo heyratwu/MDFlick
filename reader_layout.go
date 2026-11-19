@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -14,6 +15,11 @@ const readerTextWidth float32 = 820
 const readerHighlightLimit = 32 << 10
 
 const readerTitleBarHeight = 40
+
+var (
+	readerCopyIcon  = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 3.6V3.2A1.7 1.7 0 0 0 8.8 1.5H4.2A1.7 1.7 0 0 0 2.5 3.2v4.6a1.7 1.7 0 0 0 1.7 1.7h.4"/></svg>`))
+	readerCheckIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>`))
+)
 
 func (a *readerWindow) titleBar(c *ui.Context) {
 	bar := c.TitleBar()
@@ -33,6 +39,25 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 	ui.Row(c).Height(readerTitleBarHeight).Shrink(0).Padding(0, inset).
 		Background(background).Center().DragWindow().Children(func() {
 		ui.Text(c, title).FontSize(13).FontWeight(500).TextColor(foreground).MaxWidth(600)
+		if a.path != "" && !a.loading && a.failure == "" {
+			icon := readerCopyIcon
+			if !a.copiedAt.IsZero() && c.Now().Sub(a.copiedAt) < 2*time.Second {
+				icon = readerCheckIcon
+			}
+			button := ui.ButtonBase(c).Key("copy-document").Absolute().Right(bar.Right+12).Top(6).
+				Size(28, 28).Radius(5).Center().Label("复制 Markdown 全文").Tooltip("复制 Markdown 全文")
+			if button.Hovered() {
+				button.Background(foreground.Alpha(0.08))
+			}
+			button.Children(func() {
+				ui.Icon(c, icon).Size(16, 16).TextColor(foreground)
+			})
+			if button.Clicked() {
+				c.WriteClipboard(a.source)
+				a.copiedAt = c.Now()
+				c.After(2 * time.Second)
+			}
+		}
 	})
 }
 

@@ -31,6 +31,7 @@ type readerWindow struct {
 	openDocument   func(string)
 	performance    readerPerformance
 	openStarted    time.Time
+	copiedAt       time.Time
 	watchCancel    context.CancelFunc
 }
 
