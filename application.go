@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -153,9 +154,52 @@ func (manager *application) replaceWindowPath(target *readerWindow, path string)
 }
 
 func (manager *application) switchDocument(target *readerWindow, path string) {
-	if target == nil || target.closed || path == target.path {
+	if target == nil || target.closed || !(document.IsMarkdownPath(path) || isPreviewImagePath(path)) {
 		return
 	}
+	target.cancelSidebarSwitch()
+	if path == target.path {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	target.switchCancel = cancel
+	generation, win, resources := target.switchGeneration, target.win, target.resources
+	started := time.Now()
+	go func() {
+		result := readerLoadResult{}
+		if isPreviewImagePath(path) {
+			result.images = newImageStore(ctx, path, resources.images)
+			result.preview, result.err = result.images.Load(path)
+		} else {
+			result.source, result.prepared, result.err = loadReaderDocument(ctx, path, resources)
+		}
+		win.Update(func() {
+			if !target.acceptsSidebarSwitch(generation) {
+				if result.images != nil {
+					result.images.Close()
+				}
+				return
+			}
+			target.switchCancel = nil
+			cancel()
+			manager.publishSidebarSwitch(target, path, started, &result)
+		})
+	}()
+}
+
+func (a *readerWindow) cancelSidebarSwitch() {
+	a.switchGeneration++
+	if a.switchCancel != nil {
+		a.switchCancel()
+		a.switchCancel = nil
+	}
+}
+
+func (a *readerWindow) acceptsSidebarSwitch(generation uint64) bool {
+	return !a.closed && a.switchGeneration == generation
+}
+
+func (manager *application) publishSidebarSwitch(target *readerWindow, path string, started time.Time, result *readerLoadResult) {
 	if !manager.replaceWindowPath(target, path) {
 		return
 	}
@@ -164,10 +208,10 @@ func (manager *application) switchDocument(target *readerWindow, path string) {
 		target.watchCancel = nil
 	}
 	target.copiedAt = time.Time{}
-	target.openStarted = time.Now()
+	target.openStarted = started
 	target.win.SetTitle(filepath.Base(path) + " — MDFlick")
 	target.win.SetRepresentedFile(path)
-	target.load()
+	target.loadDocumentResult(false, result)
 	target.updateSidebarDirectory()
 	target.win.Invalidate()
 }

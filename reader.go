@@ -17,25 +17,36 @@ type readerWindow struct {
 	onLink    func(string)
 	resources *applicationResources
 	documentSession
-	preview        ui.ImageSource
-	images         *imageStore
-	imageScheduler *imageScheduler
-	win            *mygo.Window
-	md             *markdown.Options
-	diagrams       *diagramService
-	diagramFrame   map[diagramKey]float32
-	blockIndent    float32
-	scroll         ui.ScrollState
-	find           readerFind
-	html           readerHTMLState
-	open           func()
-	openDocument   func(string)
-	openSibling    func(string)
-	sidebar        readerSidebar
-	performance    readerPerformance
-	openStarted    time.Time
-	copiedAt       time.Time
-	watchCancel    context.CancelFunc
+	preview          ui.ImageSource
+	images           *imageStore
+	imageScheduler   *imageScheduler
+	win              *mygo.Window
+	md               *markdown.Options
+	diagrams         *diagramService
+	diagramFrame     map[diagramKey]float32
+	blockIndent      float32
+	scroll           ui.ScrollState
+	find             readerFind
+	html             readerHTMLState
+	open             func()
+	openDocument     func(string)
+	openSibling      func(string)
+	sidebar          readerSidebar
+	performance      readerPerformance
+	openStarted      time.Time
+	copiedAt         time.Time
+	watchCancel      context.CancelFunc
+	switchCancel     context.CancelFunc
+	switchGeneration uint64
+}
+
+// A sidebar replacement is prepared while the published preview stays alive.
+type readerLoadResult struct {
+	source   string
+	prepared preparedReaderDocument
+	preview  ui.ImageSource
+	images   *imageStore
+	err      error
 }
 
 func (a *readerWindow) view(c *ui.Context) {
@@ -149,6 +160,10 @@ func (a *readerWindow) refresh() {
 }
 
 func (a *readerWindow) loadDocument(refresh bool) {
+	a.loadDocumentResult(refresh, nil)
+}
+
+func (a *readerWindow) loadDocumentResult(refresh bool, ready *readerLoadResult) {
 	if a.closed {
 		return
 	}
@@ -189,12 +204,12 @@ func (a *readerWindow) loadDocument(refresh bool) {
 		a.releaseImages()
 	}
 	var previewStore *imageStore
-	if isPreviewImagePath(path) {
+	if isPreviewImagePath(path) && ready == nil {
 		a.images = newImageStore(ctx, path, resources.images)
 		previewStore = a.images
 	}
-	go func() {
-		if watchCtx != nil {
+	if watchCtx != nil {
+		go func() {
 			watchReaderFile(watchCtx, path, func() {
 				win.Update(func() {
 					if !a.closed && a.path == path {
@@ -202,14 +217,57 @@ func (a *readerWindow) loadDocument(refresh bool) {
 					}
 				})
 			})
+		}()
+	}
+	publish := func(result readerLoadResult) {
+		source, prepared, err := result.source, result.prepared, result.err
+		if isPreviewImagePath(path) {
+			if a.complete(generation, "", err) && err == nil {
+				a.preview = result.preview
+				if result.images != nil {
+					a.images = result.images
+				}
+				a.win.SetRepresentedFile(path)
+			}
+			return
 		}
+		if refresh {
+			if !a.completeRefresh(generation, source, prepared, err) {
+				return
+			}
+			a.closeDiagrams()
+		} else {
+			if !a.completePrepared(generation, source, prepared, err) {
+				return
+			}
+		}
+		if err != nil {
+			return
+		}
+		diagnostics.Record(ctx, "native.open-to-publish", started, len(source))
+		a.html = readerHTMLState{}
+		a.resetMarkdown(ctx, path)
+		if prepared.hasMermaid && document.NativePolicy().Mermaid {
+			if resources.diagramPool == nil {
+				resources.diagramPool = newDiagramPool(resources.diagrams)
+			}
+			backend := newDiagramRenderer(a.win, resources.diagramPool)
+			a.diagrams = newDiagramService(backend, func(fn func()) {
+				win.Update(func() { fn(); resources.record("native.diagram-result") })
+			}, resources.diagramCache)
+		}
+		a.win.SetRepresentedFile(path)
+		_ = mygo.App.AddRecentDocument(path)
+	}
+	if ready != nil {
+		publish(*ready)
+		return
+	}
+	go func() {
 		if previewStore != nil {
 			image, err := previewStore.Load(path)
 			win.Update(func() {
-				if a.complete(generation, "", err) && err == nil {
-					a.preview = image
-					a.win.SetRepresentedFile(path)
-				}
+				publish(readerLoadResult{preview: image, err: err})
 			})
 			return
 		}
@@ -218,33 +276,7 @@ func (a *readerWindow) loadDocument(refresh bool) {
 			return
 		}
 		win.Update(func() {
-			if refresh {
-				if !a.completeRefresh(generation, source, prepared, err) {
-					return
-				}
-				a.closeDiagrams()
-			} else {
-				if !a.completePrepared(generation, source, prepared, err) {
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-			diagnostics.Record(ctx, "native.open-to-publish", started, len(source))
-			a.html = readerHTMLState{}
-			a.resetMarkdown(ctx, path)
-			if prepared.hasMermaid && document.NativePolicy().Mermaid {
-				if resources.diagramPool == nil {
-					resources.diagramPool = newDiagramPool(resources.diagrams)
-				}
-				backend := newDiagramRenderer(a.win, resources.diagramPool)
-				a.diagrams = newDiagramService(backend, func(fn func()) {
-					win.Update(func() { fn(); resources.record("native.diagram-result") })
-				}, resources.diagramCache)
-			}
-			a.win.SetRepresentedFile(path)
-			_ = mygo.App.AddRecentDocument(path)
+			publish(readerLoadResult{source: source, prepared: prepared, err: err})
 		})
 	}()
 }
@@ -256,6 +288,7 @@ func (a *readerWindow) closeDiagrams() {
 }
 
 func (a *readerWindow) close() {
+	a.cancelSidebarSwitch()
 	a.sidebar.generation++
 	if a.watchCancel != nil {
 		a.watchCancel()

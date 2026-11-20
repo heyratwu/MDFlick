@@ -24,16 +24,20 @@ var readerFileSVG []byte
 //go:embed resources/markdown.svg
 var readerMarkdownSVG []byte
 
+//go:embed resources/chevrons-down-up.svg
+var readerCollapseFoldersSVG []byte
+
 //go:embed resources/file-image.svg
 var readerImageSVG []byte
 
 var (
-	readerSidebarIcon    = ui.MustParseSVG(readerSidebarSVG)
-	readerFolderIcon     = ui.MustParseSVG(readerFolderSVG)
-	readerFolderOpenIcon = ui.MustParseSVG(readerFolderOpenSVG)
-	readerImageIcon      = ui.MustParseSVG(readerImageSVG)
-	readerFileIcon       = ui.MustParseSVG(readerFileSVG)
-	readerMarkdownIcon   = ui.MustParseSVG(readerMarkdownSVG)
+	readerSidebarIcon         = ui.MustParseSVG(readerSidebarSVG)
+	readerFolderIcon          = ui.MustParseSVG(readerFolderSVG)
+	readerFolderOpenIcon      = ui.MustParseSVG(readerFolderOpenSVG)
+	readerImageIcon           = ui.MustParseSVG(readerImageSVG)
+	readerFileIcon            = ui.MustParseSVG(readerFileSVG)
+	readerMarkdownIcon        = ui.MustParseSVG(readerMarkdownSVG)
+	readerCollapseFoldersIcon = ui.MustParseSVG(readerCollapseFoldersSVG)
 )
 
 type sidebarEntry struct {
@@ -217,13 +221,28 @@ func (a *readerWindow) sidebarWidth(c *ui.Context) float32 {
 
 func (a *readerWindow) sidebarView(c *ui.Context) {
 	s, t := &a.sidebar, c.Theme()
-	ui.Column(c).Key("directory-sidebar").Width(a.sidebarWidth(c)).Shrink(0).Clip().Background(t.Surface).Children(func() {
+	panel := ui.Column(c).Key("directory-sidebar").Width(a.sidebarWidth(c)).Shrink(0).Clip().Background(t.Surface)
+	hovered := panel.Hovered()
+	panel.Children(func() {
 		title := "当前目录"
 		if s.directory != "" {
 			title = filepath.Base(s.directory)
 		}
-		ui.Row(c).Padding(16, 16, 10, 16).AlignItems(ui.Center).Tooltip(s.directory).Children(func() {
-			ui.Text(c, title).FontSize(12).Bold().TextColor(t.TextMuted).MinWidth(0).MaxLines(1).Ellipsis("…")
+		ui.Row(c).Padding(12, 12, 6, 16).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, title).Grow(1).FontSize(12).Bold().TextColor(t.TextMuted).MinWidth(0).MaxLines(1).Ellipsis("…")
+			button := ui.ButtonBase(c).Key("collapse-sidebar-folders").Size(24, 24).Shrink(0).Radius(4).Center().
+				Label("折叠所有文件夹").Tooltip("折叠所有文件夹").IgnoreInput(!hovered)
+			if !hovered {
+				button.Opacity(0)
+			} else if button.Hovered() {
+				button.Background(t.TextMuted.Alpha(.08))
+			}
+			button.Children(func() { ui.Icon(c, readerCollapseFoldersIcon).Size(14, 14).TextColor(t.TextMuted) })
+			button.OnClick(func() {
+				for _, folder := range s.folders {
+					folder.expanded = false
+				}
+			})
 		})
 		if a.path == "" {
 			ui.Text(c, "打开文件后显示所在目录").FontSize(12).TextColor(t.TextMuted).Padding(12)
@@ -247,7 +266,7 @@ func (a *readerWindow) sidebarView(c *ui.Context) {
 			if folder := s.folders[entry.path]; folder != nil {
 				expanded = folder.expanded
 			}
-			button := ui.ButtonBase(c).Height(30).Shrink(0).Margin(2).Padding(0, 8, 0, 8+float32(entry.depth)*16).Gap(7).Radius(5).Justify(ui.Start).AlignItems(ui.Center).Disabled(!enabled).Label(entry.name).Tooltip(entry.path)
+			button := ui.ButtonBase(c).Height(30).Shrink(0).Margin(2).Padding(0, 8, 0, 8+float32(entry.depth)*16).Gap(7).Radius(5).Justify(ui.Start).AlignItems(ui.Center).Disabled(!enabled).Label(entry.name)
 			color := t.Text
 			if !enabled {
 				color = t.TextMuted.Alpha(.5)
