@@ -221,7 +221,11 @@ func (a *readerWindow) sidebarWidth(c *ui.Context) float32 {
 
 func (a *readerWindow) sidebarView(c *ui.Context) {
 	s, t := &a.sidebar, c.Theme()
-	panel := ui.Column(c).Key("directory-sidebar").Width(a.sidebarWidth(c)).Shrink(0).Clip().Background(t.Surface)
+	background := t.Surface
+	if !t.Dark {
+		background = ui.Hex("#F9F9FA")
+	}
+	panel := ui.Column(c).Key("directory-sidebar").Width(a.sidebarWidth(c)).Shrink(0).Clip().Background(background)
 	hovered := panel.Hovered()
 	panel.Children(func() {
 		title := "当前目录"

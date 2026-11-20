@@ -1,8 +1,10 @@
 package main
 
 import (
-	"github.com/egoist/mygo/ui"
 	"testing"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestReaderStates(t *testing.T) {
@@ -71,5 +73,43 @@ func TestAssignHome(t *testing.T) {
 	manager.windows[""] = closed
 	if manager.assignHome(closed, "/tmp/second.md") {
 		t.Fatal("closed window accepted")
+	}
+}
+
+func TestNextWindowBounds(t *testing.T) {
+	// A display to the left of the primary display, below its menu bar.
+	workArea := mygo.Rectangle{X: -1000, Y: 30, Width: 1000, Height: 700}
+	tests := []struct {
+		name     string
+		previous mygo.Rectangle
+		want     mygo.Rectangle
+	}{
+		{
+			name:     "offset",
+			previous: mygo.Rectangle{X: -900, Y: 120, Width: 600, Height: 400},
+			want:     mygo.Rectangle{X: -860, Y: 160, Width: 600, Height: 400},
+		},
+		{
+			name:     "right and bottom edges",
+			previous: mygo.Rectangle{X: -610, Y: 315, Width: 600, Height: 400},
+			want:     mygo.Rectangle{X: -600, Y: 330, Width: 600, Height: 400},
+		},
+		{
+			name:     "left and top edges",
+			previous: mygo.Rectangle{X: -1100, Y: -40, Width: 600, Height: 400},
+			want:     mygo.Rectangle{X: -1000, Y: 30, Width: 600, Height: 400},
+		},
+		{
+			name:     "larger than the work area",
+			previous: mygo.Rectangle{X: -1100, Y: 0, Width: 1200, Height: 900},
+			want:     workArea,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := nextWindowBounds(test.previous, workArea); got != test.want {
+				t.Errorf("window bounds = %+v, want %+v", got, test.want)
+			}
+		})
 	}
 }

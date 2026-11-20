@@ -62,14 +62,26 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 	if path != "" {
 		title = filepath.Base(path) + " — MDFlick"
 	}
-	a.win = mygo.NewWindow(mygo.WindowOptions{
+	options := mygo.WindowOptions{
 		Title: title, Width: 900, Height: 720, MinWidth: 480, MinHeight: 360,
+		StateKey:      "reader",
 		TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: readerTitleBarHeight,
 		// Native macOS buttons are 14 points tall: equal 13-point margins
 		// center them in the 40-point title bar, including after a resize.
 		TrafficLightPosition: &mygo.Point{X: 12, Y: (readerTitleBarHeight - 14) / 2},
 		Content:              ui.View(a.view),
-	})
+	}
+	if previous := manager.lastWindow(); previous != nil {
+		bounds := previous.Bounds()
+		if bounds.Width > 0 && bounds.Height > 0 {
+			area := mygo.Screen.DisplayMatching(bounds).WorkArea
+			bounds = nextWindowBounds(bounds, area)
+			options.InitialBounds = &bounds
+			options.MinWidth = min(options.MinWidth, bounds.Width)
+			options.MinHeight = min(options.MinHeight, bounds.Height)
+		}
+	}
+	a.win = mygo.NewWindow(options)
 	a.win.OnFileDrop(func(e *mygo.FileDropEvent) {
 		a.win.Update(func() {
 			for _, path := range e.Paths {
@@ -96,6 +108,31 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 	}
 	return a
 }
+
+func (manager *application) lastWindow() *mygo.Window {
+	var latest *mygo.Window
+	for _, reader := range manager.windows {
+		// MyGo assigns increasing IDs when creating windows.
+		if latest == nil || reader.win.ID() > latest.ID() {
+			latest = reader.win
+		}
+	}
+	return latest
+}
+
+func nextWindowBounds(previous, workArea mygo.Rectangle) mygo.Rectangle {
+	const offset = 40
+	previous.X += offset
+	previous.Y += offset
+	if workArea.Width > 0 && workArea.Height > 0 {
+		previous.Width = min(previous.Width, workArea.Width)
+		previous.Height = min(previous.Height, workArea.Height)
+		previous.X = max(workArea.X, min(previous.X, workArea.X+workArea.Width-previous.Width))
+		previous.Y = max(workArea.Y, min(previous.Y, workArea.Y+workArea.Height-previous.Height))
+	}
+	return previous
+}
+
 func (manager *application) openPath(path string, target *readerWindow) {
 	openedAt := time.Now()
 	if target == nil {

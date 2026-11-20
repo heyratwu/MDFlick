@@ -631,3 +631,40 @@
 +		}
 +	}
 +}
+diff --git a/vendor/github.com/egoist/mygo/window.go b/vendor/github.com/egoist/mygo/window.go
+index be83187..5463a58 100644
+--- a/vendor/github.com/egoist/mygo/window.go
++++ b/vendor/github.com/egoist/mygo/window.go
+@@ -215,11 +215,17 @@ type WindowOptions struct {
+ 	// PathUserData or the store of App.SetWindowStateStore, saved when
+ 	// the window closes and when the app quits. A window created with the
+ 	// same key, for example at the next launch, gets them back as long as
+-	// it would show on a connected display: they override X, Y, Width,
+-	// Height, UseContentSize, Maximized and FullScreen.
++	// it would show on a connected display. Unless InitialBounds is set,
++	// the saved state overrides X, Y, Width, Height, UseContentSize,
++	// Maximized and FullScreen.
+ 	// App.ClearWindowStates forgets them.
+ 	StateKey string
+ 
++	// InitialBounds sets the window's outer bounds in screen DIPs, including
++	// at (0, 0). Width and height must be positive. StateKey still records
++	// the window's state for future windows.
++	InitialBounds *Rectangle
++
+ 	// Content makes the window show a user interface MyGo draws itself,
+ 	// on the GPU where it can, instead of a web page: create it with
+ 	// package ui. The window then has no page (Window.Page is nil): URL
+@@ -671,7 +677,11 @@ func newWindow(opts WindowOptions, bg, tint *background, native uintptr, flyout
+ 		popts.Center = false
+ 	}
+ 	w.devTools = popts.DevTools
+-	if w.stateKey != "" {
++	if r := opts.InitialBounds; r != nil {
++		popts.X, popts.Y = r.X, r.Y
++		popts.Width, popts.Height = r.Width, r.Height
++		popts.Center, popts.UseContentSize = false, false
++	} else if w.stateKey != "" {
+ 		restoreWindowState(w.stateKey, popts)
+ 	}
+ 	w.title = popts.Title
