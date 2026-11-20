@@ -114,7 +114,7 @@ func (a *readerWindow) nativeHTMLImage(c *ui.Context, im readerNativeImage) {
 		src = a.md.ResolveImage(c, source, box)
 	}
 	naturalW, naturalH := ui.ImageSize(src)
-	_, available, _ := readerWidths(c)
+	_, available, _ := a.readerWidths(c)
 	available = max(1, available-a.blockIndent)
 	width, height := nativeImageSize(metadata, naturalW, naturalH, available)
 	if width > 0 {

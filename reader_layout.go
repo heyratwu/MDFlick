@@ -23,7 +23,7 @@ var (
 
 func (a *readerWindow) titleBar(c *ui.Context) {
 	bar := c.TitleBar()
-	if bar.Height == 0 { // Native window controls hide in full screen.
+	if bar.Height == 0 {
 		return
 	}
 	title := "MDFlick"
@@ -35,11 +35,19 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 		background, foreground = ui.Hex("#2B2B2B"), ui.Hex("#E4E4E4")
 	}
 	// Equal insets keep the title centered while clearing native controls.
-	inset := max(bar.Left, bar.Right) + 12
+	inset := max(bar.Left, bar.Right) + 52
 	ui.Row(c).Height(readerTitleBarHeight).Shrink(0).Padding(0, inset).
 		Background(background).Center().DragWindow().Children(func() {
+		if a.path != "" {
+			button := ui.ButtonBase(c).Key("toggle-sidebar").Absolute().Left(bar.Left+12).Top(6).
+				Size(28, 28).Radius(5).Center().Label("切换侧边栏").Tooltip("切换侧边栏").OnClick(a.toggleSidebar)
+			if button.Hovered() {
+				button.Background(foreground.Alpha(0.08))
+			}
+			button.Children(func() { ui.Icon(c, readerSidebarIcon).Size(16, 16).TextColor(foreground) })
+		}
 		ui.Text(c, title).FontSize(13).FontWeight(500).TextColor(foreground).MaxWidth(600)
-		if a.path != "" && !a.loading && a.failure == "" {
+		if a.path != "" && !isPreviewImagePath(a.path) && !a.loading && a.failure == "" {
 			icon := readerCopyIcon
 			if !a.copiedAt.IsZero() && c.Now().Sub(a.copiedAt) < 2*time.Second {
 				icon = readerCheckIcon
@@ -64,6 +72,15 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 // Keep prose centered, but reserve the space to its right for wide blocks.
 func readerWidths(c *ui.Context) (left, prose, wide float32) {
 	window, _ := c.Size()
+	return readerWidthsFor(window)
+}
+
+func (a *readerWindow) readerWidths(c *ui.Context) (left, prose, wide float32) {
+	window, _ := c.Size()
+	return readerWidthsFor(window - a.sidebarWidth(c))
+}
+
+func readerWidthsFor(window float32) (left, prose, wide float32) {
 	prose = min(readerTextWidth, max(0, window-144))
 	left = (window - prose) / 2
 	wide = max(prose, window-left-24)
@@ -71,7 +88,7 @@ func readerWidths(c *ui.Context) (left, prose, wide float32) {
 }
 
 func (a *readerWindow) codeBlock(c *ui.Context, b *markdown.CodeBlockView) {
-	_, prose, wide := readerWidths(c)
+	_, prose, wide := a.readerWidths(c)
 	prose = max(0, prose-a.blockIndent)
 	wide = max(prose, wide-a.blockIndent)
 	box := markdown.DefaultCodeBlock(c, b)
@@ -114,7 +131,7 @@ func (a *readerWindow) styleWideBlock(c *ui.Context, d *parser.Document, i int, 
 		}
 	}
 	if b.Kind == parser.Table {
-		_, _, wide := readerWidths(c)
+		_, _, wide := a.readerWidths(c)
 		box.Width(max(0, wide-a.blockIndent))
 	}
 }

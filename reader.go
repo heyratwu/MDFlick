@@ -17,6 +17,7 @@ type readerWindow struct {
 	onLink    func(string)
 	resources *applicationResources
 	documentSession
+	preview        ui.ImageSource
 	images         *imageStore
 	imageScheduler *imageScheduler
 	win            *mygo.Window
@@ -29,6 +30,8 @@ type readerWindow struct {
 	html           readerHTMLState
 	open           func()
 	openDocument   func(string)
+	openSibling    func(string)
+	sidebar        readerSidebar
 	performance    readerPerformance
 	openStarted    time.Time
 	copiedAt       time.Time
@@ -47,80 +50,94 @@ func (a *readerWindow) view(c *ui.Context) {
 	}
 	ui.Column(c).Fill().Children(func() {
 		a.titleBar(c)
-		if a.loading {
-			ui.Text(c, "正在读取…").Padding(24)
-		} else if a.failure != "" {
-			ui.Column(c).Padding(24).Gap(12).Children(func() {
-				ui.Text(c, "无法打开文件").FontSize(22).Bold()
-				ui.Text(c, a.failure).TextColor(t.TextMuted)
-				ui.Button(c, "重试").OnClick(a.load)
+		ui.Row(c).Key("reader-panes").Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+			if a.sidebar.open {
+				a.sidebarView(c)
+			}
+			ui.Column(c).Key("reader-document").Grow(1).MinWidth(0).Clip().Children(func() {
+				a.documentView(c)
 			})
-		} else if a.path == "" {
-			// The extra 100 DIPs below move the centered welcome content up 50.
-			ui.Column(c).Grow(1).Center().Gap(16).Padding(32, 32, 132, 32).Children(func() {
-				ui.Text(c, "轻松阅读 Markdown").FontSize(20)
-				ui.Text(c, "在 Finder 中选中文件，按空格即可快速预览。").TextColor(t.TextMuted)
-				// Match a regular button's 1-DIP border without changing the accent face.
-				ui.PrimaryButton(c, "打开文件…").Border(1, ui.Transparent).OnClick(func() {
-					if a.open != nil {
-						a.open()
-					}
-				})
-			})
-		} else {
-			a.observePresentation(c)
-			if a.md == nil {
-				a.md = &markdown.Options{}
-			}
-			a.md.Theme = readerTheme(t.Dark)
-			a.md.CodeBlock = a.codeBlock
-			a.md.HighlightLimit = readerHighlightLimit
-			a.md.BlockStyle = a.readerBlockStyle
-			a.md.Block = a.nativeHTMLBlock
-			a.md.OnLink = a.linkHandler(c)
-			a.md.LinkIcon = func(dest string, size float32) (markdown.InlineObject, bool) {
-				return localDocumentIcon(dest, size, a.md.Theme.Link)
-			}
-			finishDiagrams := a.beginDiagramFrame(c)
-			defer finishDiagrams()
-			finishImages := a.beginImageFrame(c)
-			defer finishImages()
-			left, prose, _ := readerWidths(c)
-			barTop := float32(8)
-			if c.TitleBar().Height != 0 {
-				barTop += readerTitleBarHeight
-			}
-			scroll := ui.Scroll(c).Key(struct {
-				Path     string
-				Revision uint64
-			}{a.path, a.revision}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background))
-			if a.find.open {
-				scroll.SearchScrollbar(ui.Hex("#DDA600"), ui.Hex("#F58119"))
-			}
-			scroll.Children(func() {
-				top := float32(40)
-				if a.find.open {
-					top = readerFindInset
-				}
-				content := ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(top, 0, 120, 0).FontWeight(400).Children(func() {
-					if properties := a.prepared.frontMatter; properties != nil {
-						readerProperties(c, properties, a.path, prose)
-					}
-					c.Key("document-body")
-					markdown.ViewDocument(c, a.prepared.parsed, a.md)
-					if a.source == "" {
-						ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted).Unselectable()
-					}
-				})
-				if a.find.open {
-					a.find.highlight(content, a.revision, t.Dark)
-				}
-			})
-			if a.find.open {
-				a.find.bar(c, barTop)
-			}
-		}
+		})
 	})
+}
+
+func (a *readerWindow) documentView(c *ui.Context) {
+	t := c.Theme()
+	if a.loading {
+		ui.Text(c, "正在读取…").Padding(24)
+	} else if a.failure != "" {
+		ui.Column(c).Padding(24).Gap(12).Children(func() {
+			ui.Text(c, "无法打开文件").FontSize(22).Bold()
+			ui.Text(c, a.failure).TextColor(t.TextMuted)
+			ui.Button(c, "重试").OnClick(a.load)
+		})
+	} else if a.path == "" {
+		// The extra 100 DIPs below move the centered welcome content up 50.
+		ui.Column(c).Grow(1).Center().Gap(16).Padding(32, 32, 132, 32).Children(func() {
+			ui.Text(c, "轻松阅读 Markdown").FontSize(20)
+			ui.Text(c, "在 Finder 中选中文件，按空格即可快速预览。").TextColor(t.TextMuted)
+			// Match a regular button's 1-DIP border without changing the accent face.
+			ui.PrimaryButton(c, "打开文件…").Border(1, ui.Transparent).OnClick(func() {
+				if a.open != nil {
+					a.open()
+				}
+			})
+		})
+	} else if isPreviewImagePath(a.path) {
+		a.imagePreview(c)
+	} else {
+		a.observePresentation(c)
+		if a.md == nil {
+			a.md = &markdown.Options{}
+		}
+		a.md.Theme = readerTheme(t.Dark)
+		a.md.CodeBlock = a.codeBlock
+		a.md.HighlightLimit = readerHighlightLimit
+		a.md.BlockStyle = a.readerBlockStyle
+		a.md.Block = a.nativeHTMLBlock
+		a.md.OnLink = a.linkHandler(c)
+		a.md.LinkIcon = func(dest string, size float32) (markdown.InlineObject, bool) {
+			return localDocumentIcon(dest, size, a.md.Theme.Link)
+		}
+		finishDiagrams := a.beginDiagramFrame(c)
+		defer finishDiagrams()
+		finishImages := a.beginImageFrame(c)
+		defer finishImages()
+		left, prose, _ := a.readerWidths(c)
+		barTop := float32(8)
+		if c.TitleBar().Height != 0 {
+			barTop += readerTitleBarHeight
+		}
+		scroll := ui.Scroll(c).Key(struct {
+			Path     string
+			Revision uint64
+		}{a.path, a.revision}).TrackScroll(&a.scroll).Grow(1).Background(ui.Hex(typography.Colors(t.Dark).Background))
+		if a.find.open {
+			scroll.SearchScrollbar(ui.Hex("#DDA600"), ui.Hex("#F58119"))
+		}
+		scroll.Children(func() {
+			top := float32(40)
+			if a.find.open {
+				top = readerFindInset
+			}
+			content := ui.Column(c).Width(prose).Margin(0, 0, 0, left).Padding(top, 0, 120, 0).FontWeight(400).Children(func() {
+				if properties := a.prepared.frontMatter; properties != nil {
+					readerProperties(c, properties, a.path, prose)
+				}
+				c.Key("document-body")
+				markdown.ViewDocument(c, a.prepared.parsed, a.md)
+				if a.source == "" {
+					ui.Text(c, "此 Markdown 文件为空").TextColor(t.TextMuted).Unselectable()
+				}
+			})
+			if a.find.open {
+				a.find.highlight(content, a.revision, t.Dark)
+			}
+		})
+		if a.find.open {
+			a.find.bar(c, barTop)
+		}
+	}
 }
 
 func (a *readerWindow) load() {
@@ -128,7 +145,7 @@ func (a *readerWindow) load() {
 }
 
 func (a *readerWindow) refresh() {
-	a.loadDocument(a.prepared.parsed != nil && !a.loading && a.failure == "")
+	a.loadDocument(!isPreviewImagePath(a.path) && a.prepared.parsed != nil && !a.loading && a.failure == "")
 }
 
 func (a *readerWindow) loadDocument(refresh bool) {
@@ -171,6 +188,11 @@ func (a *readerWindow) loadDocument(refresh bool) {
 		a.closeDiagrams()
 		a.releaseImages()
 	}
+	var previewStore *imageStore
+	if isPreviewImagePath(path) {
+		a.images = newImageStore(ctx, path, resources.images)
+		previewStore = a.images
+	}
 	go func() {
 		if watchCtx != nil {
 			watchReaderFile(watchCtx, path, func() {
@@ -180,6 +202,16 @@ func (a *readerWindow) loadDocument(refresh bool) {
 					}
 				})
 			})
+		}
+		if previewStore != nil {
+			image, err := previewStore.Load(path)
+			win.Update(func() {
+				if a.complete(generation, "", err) && err == nil {
+					a.preview = image
+					a.win.SetRepresentedFile(path)
+				}
+			})
+			return
 		}
 		source, prepared, err := loadReaderDocumentIfChanged(ctx, path, resources, previous, refresh)
 		if ctx.Err() != nil {
@@ -224,6 +256,7 @@ func (a *readerWindow) closeDiagrams() {
 }
 
 func (a *readerWindow) close() {
+	a.sidebar.generation++
 	if a.watchCancel != nil {
 		a.watchCancel()
 		a.watchCancel = nil
@@ -257,6 +290,7 @@ func (a *readerWindow) resetMarkdown(ctx context.Context, path string) {
 }
 
 func (a *readerWindow) releaseImages() {
+	a.preview = nil
 	a.imageScheduler = nil
 	if a.images != nil {
 		a.images.Close()

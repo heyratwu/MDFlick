@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"path/filepath"
 	"time"
@@ -55,6 +56,7 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 	}
 	a := &readerWindow{documentSession: documentSession{path: path}, resources: manager.resources, openStarted: openedAt}
 	a.open = func() { manager.openDialog(a) }
+	a.openSibling = func(path string) { manager.switchDocument(a, path) }
 	title := "MDFlick"
 	if path != "" {
 		title = filepath.Base(path) + " — MDFlick"
@@ -82,7 +84,7 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 	manager.windows[path] = a
 	a.win.OnClosed(func() {
 		a.close()
-		delete(manager.windows, a.path)
+		manager.unregisterWindow(a)
 		if len(manager.windows) == 0 && manager.resources.diagramPool != nil {
 			manager.resources.diagramPool.close()
 			manager.resources.diagramPool = nil
@@ -106,17 +108,66 @@ func (manager *application) openPath(path string, target *readerWindow) {
 	if resolved, err := filepath.EvalSymlinks(absolute); err == nil {
 		absolute = resolved
 	}
-	if a := manager.windows[absolute]; a != nil {
-		a.win.Show()
-		a.win.Focus()
-		return
+	for _, a := range manager.windows {
+		if a.path == absolute {
+			a.win.Show()
+			a.win.Focus()
+			return
+		}
 	}
 	if manager.assignHome(target, absolute) {
 		target.openStarted = openedAt
 		target.win.SetTitle(filepath.Base(absolute) + " — MDFlick")
 		target.load()
+		if target.sidebar.open {
+			target.updateSidebarDirectory()
+		}
 		target.win.Invalidate()
 		return
 	}
 	manager.newWindowAt(absolute, openedAt)
+}
+
+func (manager *application) unregisterWindow(target *readerWindow) {
+	for key, window := range manager.windows {
+		if window == target {
+			delete(manager.windows, key)
+		}
+	}
+}
+
+// A sidebar selection always replaces this window, even if another window is
+// already displaying that path. Keep both windows registered independently.
+func (manager *application) replaceWindowPath(target *readerWindow, path string) bool {
+	if target == nil || target.closed || !(document.IsMarkdownPath(path) || isPreviewImagePath(path)) {
+		return false
+	}
+	manager.unregisterWindow(target)
+	key := path
+	if manager.windows[key] != nil {
+		key = fmt.Sprintf("%s\x00%p", path, target)
+	}
+	target.path = path
+	manager.windows[key] = target
+	return true
+}
+
+func (manager *application) switchDocument(target *readerWindow, path string) {
+	if target == nil || target.closed || path == target.path {
+		return
+	}
+	if !manager.replaceWindowPath(target, path) {
+		return
+	}
+	if target.watchCancel != nil {
+		target.watchCancel()
+		target.watchCancel = nil
+	}
+	target.copiedAt = time.Time{}
+	target.openStarted = time.Now()
+	target.win.SetTitle(filepath.Base(path) + " — MDFlick")
+	target.win.SetRepresentedFile(path)
+	target.load()
+	target.updateSidebarDirectory()
+	target.win.Invalidate()
 }
