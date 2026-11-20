@@ -222,6 +222,9 @@ func (a *readerWindow) loadDocumentResult(refresh bool, ready *readerLoadResult)
 	publish := func(result readerLoadResult) {
 		source, prepared, err := result.source, result.prepared, result.err
 		if isPreviewImagePath(path) {
+			if err != nil && result.images != nil {
+				result.images.Close()
+			}
 			if a.complete(generation, "", err) && err == nil {
 				a.preview = result.preview
 				if result.images != nil {

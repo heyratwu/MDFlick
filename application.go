@@ -173,15 +173,24 @@ func (manager *application) switchDocument(target *readerWindow, path string) {
 		} else {
 			result.source, result.prepared, result.err = loadReaderDocument(ctx, path, resources)
 		}
+		if ctx.Err() != nil {
+			if result.images != nil {
+				result.images.Close()
+			}
+			return
+		}
 		win.Update(func() {
 			if !target.acceptsSidebarSwitch(generation) {
 				if result.images != nil {
 					result.images.Close()
 				}
+				cancel()
 				return
 			}
 			target.switchCancel = nil
-			cancel()
+			if result.images == nil || result.err != nil {
+				cancel()
+			}
 			manager.publishSidebarSwitch(target, path, started, &result)
 		})
 	}()

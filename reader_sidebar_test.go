@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"github.com/egoist/mygo/ui"
 	"image/png"
 	"os"
@@ -52,6 +53,9 @@ func TestSidebarToggleAndNavigation(t *testing.T) {
 	tt.Frame()
 	if !a.sidebar.open || !tt.HasText("two.md") {
 		t.Fatal("sidebar did not open")
+	}
+	if info, ok := tt.Access("two.md"); !ok || info.Description != "" {
+		t.Fatalf("file row still exposes a path tooltip: %+v", info)
 	}
 	for _, name := range []string{"notes.txt", "folder"} {
 		tt.Click(name)
@@ -246,6 +250,63 @@ func TestSidebarFolderExpansionAndSpacing(t *testing.T) {
 		if err := png.Encode(f, tt.Image()); err != nil {
 			t.Fatal(err)
 		}
+	}
+	tt.Move(30, 200)
+	tt.Frame()
+	if err := tt.Click("折叠所有文件夹"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tt.HasText("child.md") || tt.HasText("notes.txt") {
+		t.Fatal("collapse-all left descendants visible")
+	}
+	for path, folder := range a.sidebar.folders {
+		if folder.expanded {
+			t.Fatalf("folder still expanded: %s", path)
+		}
+	}
+	tt.Click("nested")
+	tt.Frame()
+	if !tt.HasText("deeper") || tt.HasText("child.md") {
+		t.Fatal("collapse-all did not reset nested expansion")
+	}
+}
+
+func TestSidebarPendingSwitchKeepsPreviewAndCancelsObsoleteSelection(t *testing.T) {
+	resources := newApplicationResources()
+	// Hold preparation at admission so the old preview must remain published.
+	for i := 0; i < cap(resources.loads); i++ {
+		resources.loads <- struct{}{}
+	}
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/original.md", source: "# Original"}, resources: resources}
+	prepareTestReader(t, a)
+	prepared := a.prepared.parsed
+	manager := &application{windows: map[string]*readerWindow{a.path: a}, resources: resources}
+	tt := ui.NewTester(a.view, 900, 720)
+	for _, path := range []string{"/tmp/next.md", "/tmp/last.md"} {
+		manager.switchDocument(a, path)
+		generation := a.switchGeneration
+		tt.Frame()
+		if a.loading || a.path != "/tmp/original.md" || a.prepared.parsed != prepared || !tt.HasText("Original") || tt.HasText("正在读取…") {
+			t.Fatal("pending sidebar selection replaced the published preview")
+		}
+		if !a.acceptsSidebarSwitch(generation) {
+			t.Fatal("current selection rejected")
+		}
+		cancelled := false
+		cancel := a.switchCancel
+		a.switchCancel = func() { cancel(); cancelled = true }
+		manager.switchDocument(a, a.path)
+		if !cancelled || a.acceptsSidebarSwitch(generation) || a.switchCancel != nil {
+			t.Fatal("returning to the displayed file did not cancel the pending selection")
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.switchCancel = cancel
+	generation := a.switchGeneration
+	a.close()
+	if ctx.Err() != context.Canceled || a.acceptsSidebarSwitch(generation) {
+		t.Fatal("closing window accepted a pending replacement")
 	}
 }
 
