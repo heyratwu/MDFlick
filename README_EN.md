@@ -85,7 +85,9 @@ bash scripts/build-windows.sh amd64
 bash scripts/build-windows.sh arm64
 ```
 
-The release installer is `build/windows-amd64/mdflick-setup-0.1.1-amd64.exe` (ARM64 uses `windows-arm64` and `arm64.exe`; the version follows `mygo.json`). The scripts verify that the current build actually produced an installer. If NSIS is missing, they will not report success after producing only the main executable. When manually distributing a portable version, include the resource files from the same directory. Running the portable version directly does not perform system registration.
+The release installer is `build/windows-amd64/mdflick-setup-<version>-amd64.exe` (ARM64 uses `windows-arm64` and `arm64.exe`, and the version follows `mygo.json`). The scripts verify that the current build actually produced an installer. If NSIS is missing, they will not report success after producing only the main executable. When manually distributing a portable version, include the resource files from the same directory. Running the portable version directly does not perform system registration.
+
+Commit the version updates in `mygo.json` and `macos/QuickLook/Info.plist`, then create and push an annotated `vX.Y.Z` tag matching the app version. GitHub Actions builds ARM64 and x64 installers for macOS and Windows and publishes a GitHub Release after all four packages are ready. The tag annotation becomes the release notes.
 
 ### Windows Installation and Uninstallation
 

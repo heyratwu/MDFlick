@@ -87,7 +87,9 @@ bash scripts/build-windows.sh amd64
 bash scripts/build-windows.sh arm64
 ```
 
-发布安装程序为 `build/windows-amd64/mdflick-setup-0.1.1-amd64.exe`（ARM64 对应 `windows-arm64` 和 `arm64.exe`，版本跟随 `mygo.json`）。脚本验证本次确实生成了安装程序，缺少 NSIS 时不会只产出主程序并报告成功。手动分发便携版本时，需要包含同目录的资源文件；直接运行便携版不负责系统注册。
+发布安装程序为 `build/windows-amd64/mdflick-setup-<版本>-amd64.exe`（ARM64 对应 `windows-arm64` 和 `arm64.exe`，版本跟随 `mygo.json`）。脚本验证本次确实生成了安装程序，缺少 NSIS 时不会只产出主程序并报告成功。手动分发便携版本时，需要包含同目录的资源文件；直接运行便携版不负责系统注册。
+
+提交 `mygo.json` 和 `macos/QuickLook/Info.plist` 的版本更新后，创建与应用版本一致的注释标签（格式为 `vX.Y.Z`），然后推送标签。GitHub Actions 会构建 macOS 和 Windows 的 ARM64 与 x64 安装包，四个安装包齐备后发布 GitHub Release。标签注释会用作发布说明。
 
 ### Windows 安装与卸载
 

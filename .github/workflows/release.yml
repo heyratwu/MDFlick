@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  package:
+    name: Package ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: darwin, arch: arm64, runner: macos-15}
+          - {platform: darwin, arch: amd64, runner: macos-15-intel}
+          - {platform: windows, arch: arm64, runner: ubuntu-24.04}
+          - {platform: windows, arch: amd64, runner: ubuntu-24.04}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.mod
+            tools/go.sum
+      - name: Check release version
+        id: version
+        shell: bash
+        run: |
+          version=$(jq -er '.version' mygo.json)
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Expected tag v$version for the version in mygo.json." >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: Build macOS disk image
+        if: matrix.platform == 'darwin'
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: bash scripts/build-macos.sh "$ARCH"
+      - name: Build Windows installer
+        if: matrix.platform == 'windows'
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis
+          bash scripts/build-windows.sh "$ARCH"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: mdflick-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ matrix.platform == 'darwin' && format('build/darwin-{0}/mdflick-{1}-{0}.dmg', matrix.arch, steps.version.outputs.value) || format('build/windows-{0}/mdflick-setup-{1}-{0}.exe', matrix.arch, steps.version.outputs.value) }}
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: mdflick-*
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          assets=(
+            "dist/mdflick-$version-arm64.dmg"
+            "dist/mdflick-$version-amd64.dmg"
+            "dist/mdflick-setup-$version-amd64.exe"
+            "dist/mdflick-setup-$version-arm64.exe"
+          )
+          for asset in "${assets[@]}"; do
+            test -s "$asset"
+          done
+          notes="$RUNNER_TEMP/release-notes.md"
+          git for-each-ref --format='%(contents:subject)%0a%0a%(contents:body)' "refs/tags/$GITHUB_REF_NAME" > "$notes"
+          printf '\nmacOS packages are ad hoc signed and have not been notarized by Apple.\n' >> "$notes"
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            --verify-tag --title "MDFlick $GITHUB_REF_NAME" --notes-file "$notes"
