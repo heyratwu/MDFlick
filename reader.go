@@ -19,6 +19,7 @@ type readerWindow struct {
 	resources *applicationResources
 	documentSession
 	textPreview      *editor.State
+	textWrap         bool
 	preview          ui.ImageSource
 	images           *imageStore
 	imageScheduler   *imageScheduler
@@ -31,7 +32,6 @@ type readerWindow struct {
 	find             readerFind
 	html             readerHTMLState
 	open             func()
-	openDirectory    func()
 	openDocument     func(string)
 	openSibling      func(string)
 	sidebar          readerSidebar
@@ -91,11 +91,7 @@ func (a *readerWindow) documentView(c *ui.Context) {
 		})
 	} else if a.path == "" && a.sidebar.root != "" {
 		ui.Column(c).Grow(1).Center().Padding(24).Children(func() {
-			message := "请从左侧侧边栏选择文件预览"
-			if !a.sidebar.open {
-				message = "请展开侧边栏，选择文件预览"
-			}
-			ui.Text(c, message).TextColor(t.TextMuted)
+			ui.Text(c, "请选择文件预览").TextColor(t.TextMuted)
 		})
 	} else if a.path == "" {
 		// The extra 100 DIPs below move the centered welcome content up 50.
@@ -103,10 +99,7 @@ func (a *readerWindow) documentView(c *ui.Context) {
 			ui.Text(c, "轻松阅读 Markdown").FontSize(20)
 			ui.Text(c, "在 Finder 中选中文件，按空格即可快速预览。").TextColor(t.TextMuted)
 			// Match a regular button's 1-DIP border without changing the accent face.
-			ui.Row(c).Gap(8).Children(func() {
-				ui.PrimaryButton(c, "打开文件…").Border(1, ui.Transparent).OnClick(a.open)
-				ui.Button(c, "打开目录…").OnClick(a.openDirectory)
-			})
+			ui.PrimaryButton(c, "打开文件…").Border(1, ui.Transparent).OnClick(a.open)
 		})
 	} else if isPreviewImagePath(a.path) {
 		a.imagePreview(c)

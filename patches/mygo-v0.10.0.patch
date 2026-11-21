@@ -668,3 +668,86 @@ index be83187..5463a58 100644
  		restoreWindowState(w.stateKey, popts)
  	}
  	w.title = popts.Title
+diff --git a/vendor/github.com/egoist/mygo/dialog.go b/vendor/github.com/egoist/mygo/dialog.go
+index 573dbcd..9cc0d98 100644
+--- a/vendor/github.com/egoist/mygo/dialog.go
++++ b/vendor/github.com/egoist/mygo/dialog.go
+@@ -2,6 +2,7 @@ package mygo
+ 
+ import (
+ 	"os"
++	"runtime"
+ 	"strings"
+ 
+ 	"github.com/egoist/mygo/internal/platform"
+@@ -46,6 +47,8 @@ type OpenDialogOptions struct {
+ 	Filters []FileFilter
+ 	// Directory selects directories instead of files.
+ 	Directory bool
++	// AllowDirectories allows selecting both files and directories on macOS.
++	AllowDirectories bool
+ 	// Multiple allows selecting several entries.
+ 	Multiple        bool
+ 	ShowHiddenFiles bool
+@@ -152,7 +155,7 @@ func (DialogModule) Open(opts OpenDialogOptions) ([]string, error) {
+ 		Message:                    opts.Message,
+ 		Filters:                    toFilters(opts.Filters),
+ 		OpenFiles:                  !opts.Directory,
+-		OpenDirectories:            opts.Directory,
++		OpenDirectories:            opts.Directory || (runtime.GOOS == "darwin" && opts.AllowDirectories),
+ 		Multiple:                   opts.Multiple,
+ 		ShowHiddenFiles:            opts.ShowHiddenFiles,
+ 		CreateDirectories:          opts.CreateDirectories,
+diff --git a/vendor/github.com/egoist/mygo/ui/editor/commands.go b/vendor/github.com/egoist/mygo/ui/editor/commands.go
+index 81ced9e..5d1c98d 100644
+--- a/vendor/github.com/egoist/mygo/ui/editor/commands.go
++++ b/vendor/github.com/egoist/mygo/ui/editor/commands.go
+@@ -380,7 +380,11 @@ func (ed *editor) run(cmd Command) bool {
+ 	case RevertHunk:
+ 		return ed.revertHunks()
+ 	case ToggleSoftWrap:
+-		ed.toggledWrap = !ed.toggledWrap
++		if ed.o.onToggleSoftWrap != nil {
++			ed.o.onToggleSoftWrap()
++		} else {
++			ed.toggledWrap = !ed.toggledWrap
++		}
+ 		ed.needsBuild = true
+ 		return true
+ 	case ToggleLineNumbers:
+diff --git a/vendor/github.com/egoist/mygo/ui/editor/editor.go b/vendor/github.com/egoist/mygo/ui/editor/editor.go
+index 132de31..0654cc2 100644
+--- a/vendor/github.com/egoist/mygo/ui/editor/editor.go
++++ b/vendor/github.com/egoist/mygo/ui/editor/editor.go
+@@ -85,6 +85,7 @@ type options struct {
+ 	// noDefinitionClick and noDefinitionLink are State's
+ 	// NoDefinitionClick and NoDefinitionLink.
+ 	noDefinitionClick, noDefinitionLink bool
++	onToggleSoftWrap                    func()
+ }
+ 
+ // sharedScroll is the vertical scroll several editors share.
+diff --git a/vendor/github.com/egoist/mygo/ui/editor/state.go b/vendor/github.com/egoist/mygo/ui/editor/state.go
+index 404e310..b568ac0 100644
+--- a/vendor/github.com/egoist/mygo/ui/editor/state.go
++++ b/vendor/github.com/egoist/mygo/ui/editor/state.go
+@@ -34,6 +34,9 @@ type State struct {
+ 	// columns when narrower.
+ 	SoftWrap   bool
+ 	WrapColumn int
++	// OnToggleSoftWrap lets a toolbar share control of SoftWrap with the
++	// editor's ToggleSoftWrap command. Set SoftWrap in the callback.
++	OnToggleSoftWrap func()
+ 	// LineNumbers shows the numbers of lines in the gutter, absolute by
+ 	// default.
+ 	LineNumbers LineNumbers
+@@ -255,7 +258,8 @@ func (st *State) options() options {
+ 	}
+ 	return options{
+ 		readOnly: st.ReadOnly, font: st.Font, lineHeight: st.LineHeight, tabSize: st.TabSize, indent: st.Indent,
+-		wrap: st.SoftWrap, wrapColumn: st.WrapColumn, lineNumbers: st.LineNumbers, whitespace: st.Whitespace,
++		wrap: st.SoftWrap, wrapColumn: st.WrapColumn, onToggleSoftWrap: st.OnToggleSoftWrap,
++		lineNumbers: st.LineNumbers, whitespace: st.Whitespace,
+ 		wrapGuides: st.WrapGuides, indentGuides: !st.NoIndentGuides,
+ 		scrollPastEnd: !st.NoScrollPastEnd && !st.FitContent, scrollMargin: scrollMargin,
+ 		keepScrollbars: st.KeepScrollbars, hideScrollbars: st.NoScrollbars, scrollbar: st.Scrollbar,

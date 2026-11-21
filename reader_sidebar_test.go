@@ -156,7 +156,7 @@ func TestOpenedDirectoryWaitsForFileSelection(t *testing.T) {
 	}
 	tt := ui.NewTester(a.view, 480, 360)
 	tt.SetTitleBar(ui.TitleBar{Height: 40, Left: 78})
-	if a.path != "" || !a.sidebar.open || !tt.HasText("请从左侧侧边栏选择文件预览") || !tt.HasText("one.md") {
+	if a.path != "" || !a.sidebar.open || !tt.HasText("请选择文件预览") || !tt.HasText("one.md") {
 		t.Fatal(tt.Texts())
 	}
 	generation := a.sidebar.generation

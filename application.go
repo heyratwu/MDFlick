@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -30,17 +31,39 @@ func (a *application) assignHome(target *readerWindow, path string, directory bo
 	return true
 }
 
-func (manager *application) openDialog(target *readerWindow, directory bool) {
-	opts := mygo.OpenDialogOptions{Title: "打开目录", Directory: directory}
-	if !directory {
-		opts.Title = "打开 Markdown"
-		opts.Multiple = true
-		opts.Filters = []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown"}}}
-	}
+func (manager *application) openDialog(target *readerWindow, directoryOnly bool) {
+	var parent *mygo.Window
 	if target != nil {
-		opts.Parent = target.win
+		parent = target.win
 	}
 	go func() {
+		opts := mygo.OpenDialogOptions{Parent: parent, Title: "打开目录", Directory: directoryOnly}
+		if !directoryOnly && runtime.GOOS != "darwin" {
+			choice, err := mygo.Dialog.Message(mygo.MessageOptions{
+				Parent: parent, Title: "打开", Message: "请选择要打开的项目",
+				Buttons: []string{"文件", "目录", "取消"}, CancelButton: 2,
+			})
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			switch choice.Button {
+			case 0:
+			case 1:
+				opts.Directory = true
+			default:
+				return
+			}
+		}
+		if !opts.Directory {
+			opts.Title = "打开文件或目录"
+			opts.AllowDirectories = runtime.GOOS == "darwin"
+			if !opts.AllowDirectories {
+				opts.Title = "打开 Markdown"
+			}
+			opts.Multiple = true
+			opts.Filters = []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown"}}}
+		}
 		paths, err := mygo.Dialog.Open(opts)
 		if err != nil {
 			log.Println(err)
@@ -77,7 +100,6 @@ func (manager *application) newWindow(path string, directory bool, openedAt time
 	a := &readerWindow{resources: manager.resources, openStarted: openedAt}
 	a.setInitialPath(path, directory)
 	a.open = func() { manager.openDialog(a, false) }
-	a.openDirectory = func() { manager.openDialog(a, true) }
 	a.openSibling = func(path string) { manager.switchDocument(a, path) }
 	options := mygo.WindowOptions{
 		Title: a.title(), Width: 900, Height: 720, MinWidth: 480, MinHeight: 360,

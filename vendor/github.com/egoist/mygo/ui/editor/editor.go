@@ -85,6 +85,7 @@ type options struct {
 	// noDefinitionClick and noDefinitionLink are State's
 	// NoDefinitionClick and NoDefinitionLink.
 	noDefinitionClick, noDefinitionLink bool
+	onToggleSoftWrap                    func()
 }
 
 // sharedScroll is the vertical scroll several editors share.

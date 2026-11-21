@@ -6,10 +6,12 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 func TestReaderTextPreviewHasNoBlinkingCaret(t *testing.T) {
@@ -94,7 +96,65 @@ func TestReaderTextPreview(t *testing.T) {
 	if invalid := load("", false); invalid.err == nil || invalid.text != nil {
 		t.Fatal("binary content entered the editor")
 	}
-	if notes := newTextPreview("notes.txt", "a long line"); !notes.SoftWrap || notes.Buffer.Language() != nil {
-		t.Fatal("plain text should soft-wrap without a tokenizer")
+	if notes := newTextPreview("notes.txt", "a long line"); notes.SoftWrap || notes.Buffer.Language() != nil {
+		t.Fatal("plain text should start without wrapping or a tokenizer")
+	}
+}
+
+func TestReaderTextPreviewWrapToggle(t *testing.T) {
+	const label = "自动换行"
+	source := strings.Repeat("long line ", 35) + "\nnext line"
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/script.py"}}
+	a.textPreview = newTextPreview(a.path, source)
+	tt := ui.NewTester(a.view, 480, 360)
+	tt.SetTitleBar(ui.TitleBar{Height: 40, Left: 78})
+	button, ok := tt.AccessByRole(ui.RoleToggleButton, label)
+	if !ok || button.Checked {
+		t.Fatalf("initial wrap button = %+v", button)
+	}
+	lineTop := a.textPreview.LineTop(1)
+	x, y := int(button.Bounds.X)+6, int(button.Bounds.Y)+6
+	idle := tt.Image().At(x, y)
+	tt.Move(float32(x), float32(y))
+	hover := tt.Image().At(x, y)
+	if idle == hover {
+		t.Fatal("wrap button did not get a hover background")
+	}
+	click := func() {
+		t.Helper()
+		if err := tt.Click(label); err != nil {
+			t.Fatal(err)
+		}
+		tt.Move(15, 75)
+		tt.Frame()
+	}
+	click()
+	if checked, ok := tt.AccessByRole(ui.RoleToggleButton, label); !ok || !checked.Checked || a.textPreview.LineTop(1) <= lineTop {
+		t.Fatal("toggle did not wrap long lines and stay checked")
+	}
+	if got := tt.Image().At(x, y); got != hover {
+		t.Fatalf("checked background = %v, hover background = %v", got, hover)
+	}
+	click()
+	if checked, ok := tt.AccessByRole(ui.RoleToggleButton, label); !ok || checked.Checked || a.textPreview.LineTop(1) != lineTop {
+		t.Fatal("second click did not restore unwrapped lines")
+	}
+	a.textPreview.Run(editor.ToggleSoftWrap)
+	tt.Frame()
+	if checked, ok := tt.AccessByRole(ui.RoleToggleButton, label); !ok || !checked.Checked {
+		t.Fatal("editor wrap command did not update toolbar")
+	}
+	a.path = "/tmp/notes.txt"
+	a.textPreview = newTextPreview(a.path, source)
+	tt.Frame()
+	if !a.textPreview.SoftWrap {
+		t.Fatal("plain text preview lost the window's wrap setting")
+	}
+	a.path = "/tmp/one.md"
+	a.textPreview = nil
+	prepareTestReader(t, a)
+	tt.Frame()
+	if _, ok := tt.Access(label); ok {
+		t.Fatal("wrap button is visible for Markdown")
 	}
 }

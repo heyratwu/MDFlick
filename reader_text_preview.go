@@ -61,7 +61,7 @@ func newTextPreview(path, source string) *editor.State {
 	buffer := editor.NewBuffer(source)
 	buffer.SetLanguage(language)
 	return &editor.State{
-		Buffer: buffer, ReadOnly: true, SoftWrap: language == nil,
+		Buffer: buffer, ReadOnly: true,
 		Font: ui.Font{Family: typography.CodeFont, Size: 13}, Label: filepath.Base(path),
 		Placeholder: "此文件为空", NoActiveLine: true, NoScrollPastEnd: true,
 		// MyGo interprets the zero color as the default caret color.
@@ -70,5 +70,11 @@ func newTextPreview(path, source string) *editor.State {
 }
 
 func (a *readerWindow) textPreviewView(c *ui.Context) {
+	a.textPreview.SoftWrap = a.textWrap
+	a.textPreview.OnToggleSoftWrap = a.toggleTextWrap
 	editor.View(c.Key(a.path), a.textPreview).FillWidth().Grow(1).MinHeight(0).AutoFocus()
+}
+
+func (a *readerWindow) toggleTextWrap() {
+	a.textWrap = !a.textWrap
 }

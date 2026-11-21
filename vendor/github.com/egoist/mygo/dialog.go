@@ -2,6 +2,7 @@ package mygo
 
 import (
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/egoist/mygo/internal/platform"
@@ -46,6 +47,8 @@ type OpenDialogOptions struct {
 	Filters []FileFilter
 	// Directory selects directories instead of files.
 	Directory bool
+	// AllowDirectories allows selecting both files and directories on macOS.
+	AllowDirectories bool
 	// Multiple allows selecting several entries.
 	Multiple        bool
 	ShowHiddenFiles bool
@@ -152,7 +155,7 @@ func (DialogModule) Open(opts OpenDialogOptions) ([]string, error) {
 		Message:                    opts.Message,
 		Filters:                    toFilters(opts.Filters),
 		OpenFiles:                  !opts.Directory,
-		OpenDirectories:            opts.Directory,
+		OpenDirectories:            opts.Directory || (runtime.GOOS == "darwin" && opts.AllowDirectories),
 		Multiple:                   opts.Multiple,
 		ShowHiddenFiles:            opts.ShowHiddenFiles,
 		CreateDirectories:          opts.CreateDirectories,

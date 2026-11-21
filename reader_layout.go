@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,9 +17,13 @@ const readerHighlightLimit = 32 << 10
 
 const readerTitleBarHeight = 40
 
+//go:embed resources/text-wrap.svg
+var readerWrapSVG []byte
+
 var (
 	readerCopyIcon  = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 3.6V3.2A1.7 1.7 0 0 0 8.8 1.5H4.2A1.7 1.7 0 0 0 2.5 3.2v4.6a1.7 1.7 0 0 0 1.7 1.7h.4"/></svg>`))
 	readerCheckIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>`))
+	readerWrapIcon  = ui.MustParseSVG(readerWrapSVG)
 )
 
 func (a *readerWindow) title() string {
@@ -41,7 +46,11 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 		background, foreground = ui.Hex("#2B2B2B"), ui.Hex("#E4E4E4")
 	}
 	// Equal insets keep the title centered while clearing native controls.
-	inset := max(bar.Left, bar.Right) + 52
+	rightInset := bar.Right + 52
+	if a.textPreview != nil {
+		rightInset += 32
+	}
+	inset := max(bar.Left+52, rightInset)
 	ui.Row(c).Height(readerTitleBarHeight).Shrink(0).Padding(0, inset).
 		Background(background).Center().DragWindow().Children(func() {
 		if a.path != "" || a.sidebar.root != "" {
@@ -57,6 +66,12 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 			copyLabel := "复制 Markdown 全文"
 			if a.textPreview != nil {
 				copyLabel = "复制文件全文"
+				wrap := ui.ToggleBase(c.Key("toggle-text-wrap"), &a.textWrap).Absolute().Right(bar.Right+44).Top(6).
+					Size(28, 28).Radius(5).Label("自动换行").Tooltip("自动换行")
+				if a.textWrap || wrap.Hovered() {
+					wrap.Background(foreground.Alpha(0.08))
+				}
+				wrap.Children(func() { ui.Icon(c, readerWrapIcon).Size(16, 16).TextColor(foreground) })
 			}
 			icon := readerCopyIcon
 			if !a.copiedAt.IsZero() && c.Now().Sub(a.copiedAt) < 2*time.Second {

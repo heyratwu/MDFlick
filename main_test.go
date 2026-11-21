@@ -8,8 +8,8 @@ import (
 )
 
 func TestReaderStates(t *testing.T) {
-	opened, openedDirectories := 0, 0
-	a := &readerWindow{open: func() { opened++ }, openDirectory: func() { openedDirectories++ }}
+	opened := 0
+	a := &readerWindow{open: func() { opened++ }}
 	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 900, 720)
 	if !tt.HasText("轻松阅读 Markdown") {
@@ -24,8 +24,8 @@ func TestReaderStates(t *testing.T) {
 	if opened != 1 {
 		t.Fatalf("open actions: %d", opened)
 	}
-	if err := tt.Click("打开目录…"); err != nil || openedDirectories != 1 {
-		t.Fatalf("open directory actions: %d, err = %v", openedDirectories, err)
+	if _, ok := tt.Access("打开目录…"); ok {
+		t.Fatal("welcome page still has a separate directory button")
 	}
 	a.path, a.source = "/tmp/demo.md", "# Hello\n\n**Markdown** document\n\n- item\n"
 	prepareTestReader(t, a)

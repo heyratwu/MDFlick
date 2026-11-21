@@ -34,6 +34,9 @@ type State struct {
 	// columns when narrower.
 	SoftWrap   bool
 	WrapColumn int
+	// OnToggleSoftWrap lets a toolbar share control of SoftWrap with the
+	// editor's ToggleSoftWrap command. Set SoftWrap in the callback.
+	OnToggleSoftWrap func()
 	// LineNumbers shows the numbers of lines in the gutter, absolute by
 	// default.
 	LineNumbers LineNumbers
@@ -255,7 +258,8 @@ func (st *State) options() options {
 	}
 	return options{
 		readOnly: st.ReadOnly, font: st.Font, lineHeight: st.LineHeight, tabSize: st.TabSize, indent: st.Indent,
-		wrap: st.SoftWrap, wrapColumn: st.WrapColumn, lineNumbers: st.LineNumbers, whitespace: st.Whitespace,
+		wrap: st.SoftWrap, wrapColumn: st.WrapColumn, onToggleSoftWrap: st.OnToggleSoftWrap,
+		lineNumbers: st.LineNumbers, whitespace: st.Whitespace,
 		wrapGuides: st.WrapGuides, indentGuides: !st.NoIndentGuides,
 		scrollPastEnd: !st.NoScrollPastEnd && !st.FitContent, scrollMargin: scrollMargin,
 		keepScrollbars: st.KeepScrollbars, hideScrollbars: st.NoScrollbars, scrollbar: st.Scrollbar,

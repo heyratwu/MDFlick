@@ -380,7 +380,11 @@ func (ed *editor) run(cmd Command) bool {
 	case RevertHunk:
 		return ed.revertHunks()
 	case ToggleSoftWrap:
-		ed.toggledWrap = !ed.toggledWrap
+		if ed.o.onToggleSoftWrap != nil {
+			ed.o.onToggleSoftWrap()
+		} else {
+			ed.toggledWrap = !ed.toggledWrap
+		}
 		ed.needsBuild = true
 		return true
 	case ToggleLineNumbers:
