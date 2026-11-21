@@ -129,6 +129,51 @@ func TestSidebarToggleAndNavigation(t *testing.T) {
 	tt.Frame()
 }
 
+func TestOpenedDirectoryWaitsForFileSelection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "one.md")
+	if err := os.WriteFile(path, []byte("# Selected document"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := &readerWindow{}
+	manager := &application{windows: map[string]*readerWindow{"": a}}
+	if !manager.assignHome(a, dir, true) {
+		t.Fatal("directory did not reuse the welcome window")
+	}
+	a.loadInitialSelection()
+	entries, err := readSidebarEntries(a.sidebar.directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.sidebar.entries = entries
+	a.openSibling = func(path string) {
+		if !manager.replaceWindowPath(a, path) {
+			t.Fatal("unable to select file")
+		}
+		a.source = "# Selected document"
+		prepareTestReader(t, a)
+		a.updateSidebarDirectory()
+	}
+	tt := ui.NewTester(a.view, 480, 360)
+	tt.SetTitleBar(ui.TitleBar{Height: 40, Left: 78})
+	if a.path != "" || !a.sidebar.open || !tt.HasText("请从左侧侧边栏选择文件预览") || !tt.HasText("one.md") {
+		t.Fatal(tt.Texts())
+	}
+	generation := a.sidebar.generation
+	for i := 0; i < 2; i++ {
+		if err := tt.Click("切换侧边栏"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+	}
+	if err := tt.Click("one.md"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("Selected document") || a.path != path || a.sidebar.generation != generation || manager.windows[dir] != a {
+		t.Fatal("selecting a file did not retain the directory window and show its preview", tt.Texts())
+	}
+}
+
 func TestSidebarDragResizesReader(t *testing.T) {
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/skill/SKILL.md", source: "# Skill"}}
 	prepareTestReader(t, a)

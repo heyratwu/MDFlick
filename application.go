@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -17,26 +18,30 @@ type application struct {
 	resources *applicationResources
 }
 
-// assignHome moves an existing welcome window into the document registry.
+// assignHome moves an existing welcome window into the window registry.
 // A closed or already occupied window must never consume another selection.
-func (a *application) assignHome(target *readerWindow, path string) bool {
-	if target == nil || target.closed || target.path != "" || a.windows[""] != target {
+func (a *application) assignHome(target *readerWindow, path string, directory bool) bool {
+	if target == nil || target.closed || a.windows[""] != target {
 		return false
 	}
 	delete(a.windows, "")
-	target.path = path
-	a.windows[path] = target
+	target.setInitialPath(path, directory)
+	a.registerWindow(target, path)
 	return true
 }
 
-func (manager *application) openDialog(target *readerWindow) {
-	var parent *mygo.Window
+func (manager *application) openDialog(target *readerWindow, directory bool) {
+	opts := mygo.OpenDialogOptions{Title: "打开目录", Directory: directory}
+	if !directory {
+		opts.Title = "打开 Markdown"
+		opts.Multiple = true
+		opts.Filters = []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown"}}}
+	}
 	if target != nil {
-		parent = target.win
+		opts.Parent = target.win
 	}
 	go func() {
-		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: parent, Title: "打开 Markdown", Multiple: true,
-			Filters: []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown"}}}})
+		paths, err := mygo.Dialog.Open(opts)
 		if err != nil {
 			log.Println(err)
 			return
@@ -47,23 +52,35 @@ func (manager *application) openDialog(target *readerWindow) {
 		}
 	}()
 }
-func (manager *application) newWindow(path string) *readerWindow {
-	return manager.newWindowAt(path, time.Now())
+
+func (a *readerWindow) setInitialPath(path string, directory bool) {
+	if directory {
+		a.sidebar.root, a.sidebar.open = path, true
+	} else {
+		a.path = path
+	}
 }
 
-func (manager *application) newWindowAt(path string, openedAt time.Time) *readerWindow {
+func (a *readerWindow) loadInitialSelection() {
+	if a.path != "" {
+		a.load()
+	}
+	if a.sidebar.open {
+		a.updateSidebarDirectory()
+	}
+}
+
+func (manager *application) newWindow(path string, directory bool, openedAt time.Time) *readerWindow {
 	if manager.resources == nil {
 		manager.resources = newApplicationResources()
 	}
-	a := &readerWindow{documentSession: documentSession{path: path}, resources: manager.resources, openStarted: openedAt}
-	a.open = func() { manager.openDialog(a) }
+	a := &readerWindow{resources: manager.resources, openStarted: openedAt}
+	a.setInitialPath(path, directory)
+	a.open = func() { manager.openDialog(a, false) }
+	a.openDirectory = func() { manager.openDialog(a, true) }
 	a.openSibling = func(path string) { manager.switchDocument(a, path) }
-	title := "MDFlick"
-	if path != "" {
-		title = filepath.Base(path) + " — MDFlick"
-	}
 	options := mygo.WindowOptions{
-		Title: title, Width: 900, Height: 720, MinWidth: 480, MinHeight: 360,
+		Title: a.title(), Width: 900, Height: 720, MinWidth: 480, MinHeight: 360,
 		StateKey:      "reader",
 		TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: readerTitleBarHeight,
 		// Native macOS buttons are 14 points tall: equal 13-point margins
@@ -85,7 +102,7 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 	a.win.OnFileDrop(func(e *mygo.FileDropEvent) {
 		a.win.Update(func() {
 			for _, path := range e.Paths {
-				if document.IsMarkdownPath(path) {
+				if document.IsMarkdownPath(path) || isDirectory(path) {
 					manager.openPath(path, a)
 				}
 			}
@@ -94,7 +111,7 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 	a.openDocument = func(path string) {
 		a.win.Update(func() { manager.openPath(path, a) })
 	}
-	manager.windows[path] = a
+	manager.registerWindow(a, path)
 	a.win.OnClosed(func() {
 		a.close()
 		manager.unregisterWindow(a)
@@ -103,9 +120,7 @@ func (manager *application) newWindowAt(path string, openedAt time.Time) *reader
 			manager.resources.diagramPool = nil
 		}
 	})
-	if path != "" {
-		a.load()
-	}
+	a.loadInitialSelection()
 	return a
 }
 
@@ -146,24 +161,48 @@ func (manager *application) openPath(path string, target *readerWindow) {
 	if resolved, err := filepath.EvalSymlinks(absolute); err == nil {
 		absolute = resolved
 	}
+	directory := isDirectory(absolute)
 	for _, a := range manager.windows {
-		if a.path == absolute {
+		if (directory && a.sidebar.root == absolute) || (!directory && a.path == absolute) {
+			if directory && !a.sidebar.open {
+				a.toggleSidebar()
+				a.win.Invalidate()
+			}
 			a.win.Show()
 			a.win.Focus()
 			return
 		}
 	}
-	if manager.assignHome(target, absolute) {
+	if manager.assignHome(target, absolute, directory) {
 		target.openStarted = openedAt
-		target.win.SetTitle(filepath.Base(absolute) + " — MDFlick")
-		target.load()
-		if target.sidebar.open {
-			target.updateSidebarDirectory()
-		}
+		target.win.SetTitle(target.title())
+		target.loadInitialSelection()
 		target.win.Invalidate()
 		return
 	}
-	manager.newWindowAt(absolute, openedAt)
+	manager.newWindow(absolute, directory, openedAt)
+}
+
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func (manager *application) registerWindow(target *readerWindow, path string) {
+	key := path
+	if manager.windows[key] != nil {
+		key = fmt.Sprintf("%s\x00%p", path, target)
+	}
+	manager.windows[key] = target
+}
+
+func (manager *application) readerForWindow(win *mygo.Window) *readerWindow {
+	for _, reader := range manager.windows {
+		if reader.win == win {
+			return reader
+		}
+	}
+	return nil
 }
 
 func (manager *application) unregisterWindow(target *readerWindow) {
@@ -180,13 +219,12 @@ func (manager *application) replaceWindowPath(target *readerWindow, path string)
 	if target == nil || target.closed || !isReaderPreviewPath(path) {
 		return false
 	}
-	manager.unregisterWindow(target)
-	key := path
-	if manager.windows[key] != nil {
-		key = fmt.Sprintf("%s\x00%p", path, target)
-	}
 	target.path = path
-	manager.windows[key] = target
+	if target.sidebar.root != "" {
+		return true
+	}
+	manager.unregisterWindow(target)
+	manager.registerWindow(target, path)
 	return true
 }
 
@@ -255,7 +293,7 @@ func (manager *application) publishSidebarSwitch(target *readerWindow, path stri
 	}
 	target.copiedAt = time.Time{}
 	target.openStarted = started
-	target.win.SetTitle(filepath.Base(path) + " — MDFlick")
+	target.win.SetTitle(target.title())
 	target.win.SetRepresentedFile(path)
 	target.loadDocumentResult(false, result)
 	target.updateSidebarDirectory()

@@ -8,8 +8,8 @@ import (
 )
 
 func TestReaderStates(t *testing.T) {
-	opened := 0
-	a := &readerWindow{open: func() { opened++ }}
+	opened, openedDirectories := 0, 0
+	a := &readerWindow{open: func() { opened++ }, openDirectory: func() { openedDirectories++ }}
 	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 900, 720)
 	if !tt.HasText("轻松阅读 Markdown") {
@@ -23,6 +23,9 @@ func TestReaderStates(t *testing.T) {
 	}
 	if opened != 1 {
 		t.Fatalf("open actions: %d", opened)
+	}
+	if err := tt.Click("打开目录…"); err != nil || openedDirectories != 1 {
+		t.Fatalf("open directory actions: %d, err = %v", openedDirectories, err)
 	}
 	a.path, a.source = "/tmp/demo.md", "# Hello\n\n**Markdown** document\n\n- item\n"
 	prepareTestReader(t, a)
@@ -57,21 +60,21 @@ func TestReaderStates(t *testing.T) {
 func TestAssignHome(t *testing.T) {
 	home := &readerWindow{}
 	manager := &application{windows: map[string]*readerWindow{"": home}}
-	if !manager.assignHome(home, "/tmp/first.md") {
+	if !manager.assignHome(home, "/tmp/first.md", false) {
 		t.Fatal("welcome window was not reused")
 	}
 	if len(manager.windows) != 1 || manager.windows["/tmp/first.md"] != home || home.path != "/tmp/first.md" {
 		t.Fatal("document should occupy the original window")
 	}
-	if manager.assignHome(home, "/tmp/second.md") {
+	if manager.assignHome(home, "/tmp/second.md", false) {
 		t.Fatal("occupied window consumed a second file")
 	}
-	if manager.assignHome(nil, "/tmp/second.md") {
+	if manager.assignHome(nil, "/tmp/second.md", false) {
 		t.Fatal("missing window accepted")
 	}
 	closed := &readerWindow{documentSession: documentSession{closed: true}}
 	manager.windows[""] = closed
-	if manager.assignHome(closed, "/tmp/second.md") {
+	if manager.assignHome(closed, "/tmp/second.md", false) {
 		t.Fatal("closed window accepted")
 	}
 }

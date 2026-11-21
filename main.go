@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
-	"github.com/egoist/mygo"
 	"log"
-	"mdflick/internal/diagnostics"
 	"time"
+
+	"github.com/egoist/mygo"
+	"mdflick/internal/diagnostics"
 )
 
 func main() {
@@ -19,14 +20,10 @@ func main() {
 		{Role: mygo.RoleAppMenu},
 		{Label: "文件", Submenu: []*mygo.MenuItem{
 			{Label: "打开…", Accelerator: "CmdOrCtrl+O", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
-				var target *readerWindow
-				for _, a := range manager.windows {
-					if a.win == w {
-						target = a
-						break
-					}
-				}
-				manager.openDialog(target)
+				manager.openDialog(manager.readerForWindow(w), false)
+			}},
+			{Label: "打开目录…", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
+				manager.openDialog(manager.readerForWindow(w), true)
 			}},
 			{Role: mygo.RoleOpenRecent},
 			{Label: "重新载入", Accelerator: "CmdOrCtrl+R", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
@@ -56,7 +53,7 @@ func main() {
 	// MyGo quits when the last window closes unless a listener overrides it.
 	mygo.App.WhenReady(func() {
 		if len(manager.windows) == 0 {
-			manager.newWindow("")
+			manager.newWindow("", false, time.Now())
 		}
 	})
 	if err := mygo.App.Run(); err != nil {

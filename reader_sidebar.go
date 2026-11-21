@@ -56,6 +56,7 @@ type sidebarEntry struct {
 }
 type readerSidebar struct {
 	open, loading      bool
+	root               string // Explicitly opened directory, independent of the previewed file.
 	directory, failure string
 	entries            []sidebarEntry
 	generation         uint64
@@ -219,12 +220,11 @@ func (a *readerWindow) refreshSidebar() {
 	s.entries, s.failure, s.loading = nil, "", false
 	s.list = ui.ListState{}
 	s.folders = make(map[string]*sidebarFolder)
-	if a.path == "" {
-		s.directory = ""
-		return
+	s.directory = s.root
+	if s.directory == "" && a.path != "" {
+		s.directory = filepath.Dir(a.path)
 	}
-	s.directory = filepath.Dir(a.path)
-	if a.win == nil {
+	if s.directory == "" || a.win == nil {
 		return
 	}
 	s.loading = true
@@ -297,7 +297,7 @@ func (a *readerWindow) sidebarDivider(c *ui.Context) {
 		}
 		return true
 	})
-	color := t.Border
+	color := t.Border.Alpha(.45)
 	if divider.Hovered() || s.resizing {
 		color = t.Accent
 	}
@@ -335,7 +335,7 @@ func (a *readerWindow) sidebarView(c *ui.Context) {
 				}
 			})
 		})
-		if a.path == "" {
+		if s.directory == "" {
 			ui.Text(c, "打开文件后显示所在目录").FontSize(12).TextColor(t.TextMuted).Padding(12)
 			return
 		}
@@ -348,6 +348,10 @@ func (a *readerWindow) sidebarView(c *ui.Context) {
 			return
 		}
 		rows := s.rows()
+		if len(rows) == 0 {
+			ui.Text(c, "空文件夹").FontSize(12).TextColor(t.TextMuted).Padding(12)
+			return
+		}
 		ui.List(c.Key("directory-files"), &s.list, len(rows)).Grow(1).Padding(0, 6, 12, 6).
 			ItemKey(func(i int) any { return rows[i].path }).Rows(func(row ui.ListRow) {
 			c := row.Context

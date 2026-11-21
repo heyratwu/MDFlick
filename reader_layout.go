@@ -21,14 +21,20 @@ var (
 	readerCheckIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>`))
 )
 
+func (a *readerWindow) title() string {
+	if a.path != "" {
+		return filepath.Base(a.path) + " — MDFlick"
+	}
+	if a.sidebar.root != "" {
+		return filepath.Base(a.sidebar.root) + " — MDFlick"
+	}
+	return "MDFlick"
+}
+
 func (a *readerWindow) titleBar(c *ui.Context) {
 	bar := c.TitleBar()
 	if bar.Height == 0 {
 		return
-	}
-	title := "MDFlick"
-	if a.path != "" {
-		title = filepath.Base(a.path) + " — MDFlick"
 	}
 	background, foreground := ui.Hex("#F4F3F4"), ui.Hex("#4A4A4A")
 	if c.Theme().Dark {
@@ -38,7 +44,7 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 	inset := max(bar.Left, bar.Right) + 52
 	ui.Row(c).Height(readerTitleBarHeight).Shrink(0).Padding(0, inset).
 		Background(background).Center().DragWindow().Children(func() {
-		if a.path != "" {
+		if a.path != "" || a.sidebar.root != "" {
 			button := ui.ButtonBase(c).Key("toggle-sidebar").Absolute().Left(bar.Left+12).Top(6).
 				Size(28, 28).Radius(5).Center().Label("切换侧边栏").Tooltip("切换侧边栏").OnClick(a.toggleSidebar)
 			if button.Hovered() {
@@ -46,7 +52,7 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 			}
 			button.Children(func() { ui.Icon(c, readerSidebarIcon).Size(16, 16).TextColor(foreground) })
 		}
-		ui.Text(c, title).FontSize(13).FontWeight(500).TextColor(foreground).MaxWidth(600)
+		ui.Text(c, a.title()).FontSize(13).FontWeight(500).TextColor(foreground).MaxWidth(600)
 		if a.path != "" && !isPreviewImagePath(a.path) && !a.loading && a.failure == "" {
 			copyLabel := "复制 Markdown 全文"
 			if a.textPreview != nil {
