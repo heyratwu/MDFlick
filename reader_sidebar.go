@@ -52,6 +52,10 @@ type readerSidebar struct {
 	generation         uint64
 	list               ui.ListState
 	folders            map[string]*sidebarFolder
+	width              float32
+	resizing           bool
+	resizeGrab         float32
+	resizeOriginal     float32
 }
 
 type sidebarFolder struct {
@@ -215,8 +219,63 @@ func (a *readerWindow) sidebarWidth(c *ui.Context) float32 {
 	if !a.sidebar.open {
 		return 0
 	}
-	width, _ := c.Size()
-	return min(240, width*.35)
+	window, _ := c.Size()
+	if a.sidebar.width == 0 {
+		return min(240, window*.35)
+	}
+	low, high := sidebarWidthLimits(window)
+	return min(max(a.sidebar.width, low), high)
+}
+
+func sidebarWidthLimits(window float32) (low, high float32) {
+	high = max(0, min(window*.6, window-240))
+	return min(144, high), high
+}
+
+func (a *readerWindow) sidebarDivider(c *ui.Context) {
+	const grip = 8
+	s, t := &a.sidebar, c.Theme()
+	width := a.sidebarWidth(c)
+	window, _ := c.Size()
+	low, high := sidebarWidthLimits(window)
+	setWidth := func(value float32) {
+		s.width = min(max(value, low), high)
+	}
+	divider := ui.Box(c.Key("sidebar-divider")).Absolute().Left(width-grip/2).Top(0).Bottom(0).Width(grip).
+		Cursor(ui.CursorResizeEW).Focusable().Role(ui.RoleSplitter).Label("调整侧栏宽度").
+		Range(float64(low), float64(high), float64(width)).
+		OnShortcut(0, ui.KeyLeft, func() { setWidth(width - 12) }).
+		OnShortcut(0, ui.KeyRight, func() { setWidth(width + 12) })
+	divider.HandleInput(func(ev ui.InputEvent) bool {
+		if ev.Button != 0 {
+			return false
+		}
+		switch ev.Kind {
+		case ui.InputPointerDown:
+			s.resizing, s.resizeGrab, s.resizeOriginal = true, ev.X, s.width
+		case ui.InputPointerMove:
+			if !s.resizing {
+				return false
+			}
+			// The local X is measured from the divider's latest position.
+			setWidth(width + ev.X - s.resizeGrab)
+		case ui.InputPointerUp:
+			if ev.Canceled {
+				s.width = s.resizeOriginal
+			}
+			s.resizing = false
+		default:
+			return false
+		}
+		return true
+	})
+	color := t.Border
+	if divider.Hovered() || s.resizing {
+		color = t.Accent
+	}
+	divider.Draw(func(p *ui.Painter, r ui.Rect) {
+		p.Fill(ui.Rect{X: r.X + grip/2, Y: r.Y, W: 1, H: r.H}, color, 0)
+	})
 }
 
 func (a *readerWindow) sidebarView(c *ui.Context) {

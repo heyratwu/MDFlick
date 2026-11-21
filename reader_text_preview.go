@@ -53,6 +53,8 @@ func newTextPreview(path, source string) *editor.State {
 		Buffer: buffer, ReadOnly: true, SoftWrap: language == nil,
 		Font: ui.Font{Family: typography.CodeFont, Size: 13}, Label: filepath.Base(path),
 		Placeholder: "此文件为空", NoActiveLine: true, NoScrollPastEnd: true,
+		// MyGo interprets the zero color as the default caret color.
+		Theme: &editor.Theme{Cursor: ui.RGBA(255, 255, 255, 0)},
 	}
 }
 

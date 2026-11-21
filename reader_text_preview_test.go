@@ -1,14 +1,33 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
+
+func TestReaderTextPreviewHasNoBlinkingCaret(t *testing.T) {
+	path := "/tmp/notes.txt"
+	a := &readerWindow{documentSession: documentSession{path: path}, textPreview: newTextPreview(path, "只读文本")}
+	tt := ui.NewTester(a.view, 600, 480)
+	for _, dark := range []bool{false, true} {
+		tt.SetDark(dark)
+		if !tt.Focused("notes.txt") {
+			t.Fatal("preview needs keyboard focus to exercise the caret")
+		}
+		before := bytes.Clone(tt.Image().Pix)
+		tt.Advance(500 * time.Millisecond)
+		if !bytes.Equal(before, tt.Image().Pix) {
+			t.Fatalf("focused preview changed across the caret blink interval in dark mode %t", dark)
+		}
+	}
+}
 
 func TestReaderTextPreview(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "script.py")

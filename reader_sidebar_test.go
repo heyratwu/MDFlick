@@ -105,6 +105,57 @@ func TestSidebarToggleAndNavigation(t *testing.T) {
 	tt.Frame()
 }
 
+func TestSidebarDragResizesReader(t *testing.T) {
+	a := &readerWindow{documentSession: documentSession{path: "/tmp/skill/SKILL.md", source: "# Skill"}}
+	prepareTestReader(t, a)
+	a.sidebar.open = true
+	a.sidebar.directory = filepath.Dir(a.path)
+	tt := ui.NewTester(a.view, 900, 720)
+	tt.SetTitleBar(ui.TitleBar{Height: 40, Left: 78})
+	dividerX := func() float32 {
+		t.Helper()
+		info, ok := tt.AccessByRole(ui.RoleSplitter, "调整侧栏宽度")
+		if !ok {
+			t.Fatal("sidebar divider missing")
+		}
+		return info.Bounds.X + info.Bounds.W/2
+	}
+	initial := dividerX()
+	headingBefore, _ := tt.Find("Skill")
+	tt.Press(initial, 300)
+	tt.Move(initial+60, 300)
+	if x := dividerX(); x != initial+60 {
+		t.Fatalf("divider during drag = %v, want %v", x, initial+60)
+	}
+	tt.Move(initial+110, 300)
+	tt.Release(initial+110, 300)
+	resized := dividerX()
+	if resized != initial+110 {
+		t.Fatalf("divider after drag = %v, want %v", resized, initial+110)
+	}
+	if heading, ok := tt.Find("Skill"); !ok || heading.X <= headingBefore.X || heading.X+heading.W > 900 {
+		t.Fatalf("reader did not reflow: %+v", heading)
+	}
+	tt.Press(resized, 300)
+	tt.Move(850, 300)
+	if x := dividerX(); x != 540 {
+		t.Fatalf("divider width limit = %v", x)
+	}
+	tt.CancelPress()
+	if x := dividerX(); x != resized {
+		t.Fatalf("canceled drag changed the divider to %v", x)
+	}
+	if err := tt.Click("切换侧边栏"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("切换侧边栏"); err != nil {
+		t.Fatal(err)
+	}
+	if x := dividerX(); x != resized {
+		t.Fatalf("reopened sidebar changed the divider to %v", x)
+	}
+}
+
 func TestSidebarReplacesWindowRegistry(t *testing.T) {
 	first := &readerWindow{documentSession: documentSession{path: "/one.md"}}
 	second := &readerWindow{documentSession: documentSession{path: "/two.md"}}

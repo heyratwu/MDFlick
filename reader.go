@@ -71,6 +71,9 @@ func (a *readerWindow) view(c *ui.Context) {
 			ui.Column(c).Key("reader-document").Grow(1).MinWidth(0).Clip().Children(func() {
 				a.documentView(c)
 			})
+			if a.sidebar.open {
+				a.sidebarDivider(c)
+			}
 		})
 	})
 }
