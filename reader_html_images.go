@@ -154,7 +154,7 @@ func (a *readerWindow) nativeHTMLImage(c *ui.Context, im readerNativeImage) {
 				}
 			}
 		}
-		if im.link != "" && document.NativePolicy().Link(im.link) != document.IgnoreLink {
+		if im.link != "" && nativeReaderLink(im.link) != document.IgnoreLink {
 			dest := im.link
 			handler := a.md.OnLink
 			ui.ButtonBase(c).Role(ui.RoleLink).Label(im.alt).Padding(0).MaxWidthPercent(100).OnClick(func() {

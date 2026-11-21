@@ -43,6 +43,27 @@ func LoadContext(ctx context.Context, path string) (string, error) {
 	if !IsMarkdownPath(path) {
 		return "", UnsupportedExtension
 	}
+	return readFile(ctx, path)
+}
+
+// LoadTextContext reads a regular UTF-8 file with the same size limit as Markdown.
+// The reader chooses which filenames it offers for text preview.
+func LoadTextContext(ctx context.Context, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	// Reject special files before opening them. Opening a pipe can block.
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", NotRegular
+	}
+	return readFile(ctx, path)
+}
+
+func readFile(ctx context.Context, path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

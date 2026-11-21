@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown"
 	"mdflick/internal/diagnostics"
 	"mdflick/internal/document"
@@ -17,6 +18,7 @@ type readerWindow struct {
 	onLink    func(string)
 	resources *applicationResources
 	documentSession
+	textPreview      *editor.State
 	preview          ui.ImageSource
 	images           *imageStore
 	imageScheduler   *imageScheduler
@@ -44,6 +46,7 @@ type readerWindow struct {
 type readerLoadResult struct {
 	source   string
 	prepared preparedReaderDocument
+	text     *editor.State
 	preview  ui.ImageSource
 	images   *imageStore
 	err      error
@@ -53,9 +56,9 @@ func (a *readerWindow) view(c *ui.Context) {
 	t := *c.Theme()
 	t.Scrollbar.A -= t.Scrollbar.A / 4
 	c.SetTheme(&t)
-	if a.prepared.parsed != nil {
+	if a.prepared.parsed != nil || a.textPreview != nil {
 		c.OnShortcut(ui.Cmd, ui.KeyF, a.showFind)
-		if a.find.open {
+		if a.prepared.parsed != nil && a.find.open {
 			c.OnShortcut(0, ui.KeyEscape, a.find.hide)
 		}
 	}
@@ -96,6 +99,8 @@ func (a *readerWindow) documentView(c *ui.Context) {
 		})
 	} else if isPreviewImagePath(a.path) {
 		a.imagePreview(c)
+	} else if a.textPreview != nil {
+		a.textPreviewView(c)
 	} else {
 		a.observePresentation(c)
 		if a.md == nil {
@@ -156,7 +161,7 @@ func (a *readerWindow) load() {
 }
 
 func (a *readerWindow) refresh() {
-	a.loadDocument(!isPreviewImagePath(a.path) && a.prepared.parsed != nil && !a.loading && a.failure == "")
+	a.loadDocument((a.prepared.parsed != nil || a.textPreview != nil) && !a.loading && a.failure == "")
 }
 
 func (a *readerWindow) loadDocument(refresh bool) {
@@ -183,6 +188,7 @@ func (a *readerWindow) loadDocumentResult(refresh bool, ready *readerLoadResult)
 		ctx, generation = a.beginRefresh()
 	} else {
 		ctx, generation = a.beginLoad()
+		a.textPreview = nil
 		a.scroll = ui.ScrollState{}
 		a.find.reset()
 		a.find.focus = a.find.open
@@ -248,6 +254,12 @@ func (a *readerWindow) loadDocumentResult(refresh bool, ready *readerLoadResult)
 			return
 		}
 		diagnostics.Record(ctx, "native.open-to-publish", started, len(source))
+		a.textPreview = result.text
+		a.win.SetRepresentedFile(path)
+		_ = mygo.App.AddRecentDocument(path)
+		if result.text != nil {
+			return
+		}
 		a.html = readerHTMLState{}
 		a.resetMarkdown(ctx, path)
 		if prepared.hasMermaid && document.NativePolicy().Mermaid {
@@ -259,8 +271,6 @@ func (a *readerWindow) loadDocumentResult(refresh bool, ready *readerLoadResult)
 				win.Update(func() { fn(); resources.record("native.diagram-result") })
 			}, resources.diagramCache)
 		}
-		a.win.SetRepresentedFile(path)
-		_ = mygo.App.AddRecentDocument(path)
 	}
 	if ready != nil {
 		publish(*ready)
@@ -274,12 +284,12 @@ func (a *readerWindow) loadDocumentResult(refresh bool, ready *readerLoadResult)
 			})
 			return
 		}
-		source, prepared, err := loadReaderDocumentIfChanged(ctx, path, resources, previous, refresh)
+		result := loadReaderFile(ctx, path, resources, previous, refresh)
 		if ctx.Err() != nil {
 			return
 		}
 		win.Update(func() {
-			publish(readerLoadResult{source: source, prepared: prepared, err: err})
+			publish(result)
 		})
 	}()
 }
@@ -298,6 +308,7 @@ func (a *readerWindow) close() {
 		a.watchCancel = nil
 	}
 	a.documentSession.close()
+	a.textPreview = nil
 	a.releaseImages()
 	a.closeDiagrams()
 	a.resources.record("native.closed")
@@ -337,29 +348,35 @@ func (a *readerWindow) releaseImages() {
 
 // Hold a slot through both read and preparation; queued windows do not retain
 // file contents. Timeout applies to this operation, not the image-store lifetime.
-func loadReaderDocument(parent context.Context, path string, resources *applicationResources) (string, preparedReaderDocument, error) {
-	return loadReaderDocumentIfChanged(parent, path, resources, "", false)
-}
-
-func loadReaderDocumentIfChanged(parent context.Context, path string, resources *applicationResources, previous string, compare bool) (string, preparedReaderDocument, error) {
+func loadReaderFile(parent context.Context, path string, resources *applicationResources, previous string, compare bool) readerLoadResult {
 	ctx, cancel := context.WithTimeout(parent, document.NativeLimits().Timeout)
 	defer cancel()
 	if err := acquireWork(ctx, resources.loads); err != nil {
-		return "", preparedReaderDocument{}, err
+		return readerLoadResult{err: err}
 	}
 	defer func() { <-resources.loads }()
 	started := time.Now()
-	source, err := document.LoadContext(ctx, path)
+	text := isTextPreviewPath(path)
+	var source string
+	var err error
+	if text {
+		source, err = readTextPreview(ctx, path)
+	} else {
+		source, err = document.LoadContext(ctx, path)
+	}
 	diagnostics.Record(ctx, "native.read", started, len(source))
 	if err != nil {
-		return "", preparedReaderDocument{}, err
+		return readerLoadResult{err: err}
 	}
 	if compare && source == previous {
-		return source, preparedReaderDocument{}, nil
+		return readerLoadResult{source: source}
+	}
+	if text {
+		return readerLoadResult{source: source, text: newTextPreview(path, source)}
 	}
 	prepared, err := prepareReaderDocument(ctx, source)
 	if err != nil {
-		return "", preparedReaderDocument{}, err
+		return readerLoadResult{err: err}
 	}
-	return source, prepared, nil
+	return readerLoadResult{source: source, prepared: prepared}
 }

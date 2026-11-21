@@ -42,3 +42,32 @@ func TestReaderLocalDocumentLinks(t *testing.T) {
 		t.Fatalf("copied link text = %q", got)
 	}
 }
+
+func TestReaderLocalSourceLinkOpensInCurrentPane(t *testing.T) {
+	base := t.TempDir()
+	a := &readerWindow{documentSession: documentSession{
+		path: filepath.Join(base, "SKILL.md"), source: "[Script](scripts/my%20script.py) and [Notes](notes.txt)",
+	}}
+	var opened string
+	a.openSibling = func(path string) { opened = path }
+	prepareTestReader(t, a)
+	tt := ui.NewTester(a.view, 900, 720)
+	for _, tc := range []struct{ label, path string }{
+		{"Script", filepath.Join(base, "scripts", "my script.py")},
+		{"Notes", filepath.Join(base, "notes.txt")},
+	} {
+		r, ok := tt.Find("\uFFFC\u2060" + tc.label)
+		if !ok {
+			t.Fatalf("missing local file link for %s", tc.label)
+		}
+		tt.ClickAt(r.X+3, r.Y+r.H/2)
+		if opened != tc.path || !a.sidebar.open {
+			t.Fatalf("%s opened %q, sidebar open = %v", tc.label, opened, a.sidebar.open)
+		}
+	}
+	a.path = filepath.Join(base, "scripts", "my script.py")
+	a.updateSidebarDirectory()
+	if a.sidebar.directory != base {
+		t.Fatalf("nested link replaced the Skill directory: %q", a.sidebar.directory)
+	}
+}

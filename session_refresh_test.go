@@ -34,7 +34,8 @@ func TestRefreshKeepsPreviewAcrossDuplicateSaveEvents(t *testing.T) {
 				t.Fatalf("refresh hid the existing preview: %v", tt.Texts())
 			}
 		}
-		source, next, err := loadReaderDocumentIfChanged(ctx, path, resources, previous, true)
+		result := loadReaderFile(ctx, path, resources, previous, true)
+		source, next, err := result.source, result.prepared, result.err
 		changed := a.completeRefresh(generation, source, next, err)
 		if err != nil || changed != (i == 0) {
 			t.Fatalf("unexpected refresh result: changed=%v error=%v", changed, err)

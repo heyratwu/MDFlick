@@ -7,7 +7,7 @@ import (
 )
 
 func localDocumentIcon(dest string, size float32, color ui.Color) (markdown.InlineObject, bool) {
-	if document.LocalDocumentPath(dest) == "" {
+	if localReaderPath(dest) == "" {
 		return markdown.InlineObject{}, false
 	}
 	return markdown.InlineObject{
@@ -30,4 +30,19 @@ func localDocumentIcon(dest string, size float32, color ui.Color) (markdown.Inli
 			}
 		},
 	}, true
+}
+
+func localReaderPath(dest string) string {
+	path := document.LocalFilePath(dest)
+	if document.IsMarkdownPath(path) || isTextPreviewPath(path) {
+		return path
+	}
+	return ""
+}
+
+func nativeReaderLink(dest string) document.LinkAction {
+	if localReaderPath(dest) != "" {
+		return document.OpenLocalDocument
+	}
+	return document.NativePolicy().Link(dest)
 }

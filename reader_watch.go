@@ -20,7 +20,7 @@ func watchReaderFile(ctx context.Context, path string, changed func()) {
 	})
 	if err != nil {
 		if ctx.Err() == nil {
-			log.Printf("watch Markdown %q: %v", path, err)
+			log.Printf("watch reader file %q: %v", path, err)
 		}
 		return
 	}
@@ -41,7 +41,7 @@ func consumeReaderFileChanges(ctx context.Context, watcher readerFileWatcher, ch
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				log.Printf("watch Markdown: %v", err)
+				log.Printf("watch reader file: %v", err)
 			}
 			return
 		}

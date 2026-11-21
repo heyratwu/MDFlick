@@ -64,6 +64,15 @@ func (p DisplayPolicy) Link(dest string) LinkAction {
 // LocalDocumentPath returns the filesystem path in a Markdown link, if any.
 // URL query strings and fragments are separate from the file name.
 func LocalDocumentPath(dest string) string {
+	path := LocalFilePath(dest)
+	if IsMarkdownPath(path) {
+		return path
+	}
+	return ""
+}
+
+// LocalFilePath resolves a local link to its decoded path before checking its type.
+func LocalFilePath(dest string) string {
 	if runtime.GOOS == "windows" {
 		dest = strings.ReplaceAll(dest, "\\", "/")
 		if !strings.HasPrefix(dest, "/") && filepath.IsAbs(dest) {
@@ -96,10 +105,7 @@ func LocalDocumentPath(dest string) string {
 			return ""
 		}
 	}
-	if IsMarkdownPath(path) {
-		return path
-	}
-	return ""
+	return path
 }
 
 func (p DisplayPolicy) AllowsImage(source string) bool {

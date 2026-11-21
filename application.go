@@ -177,7 +177,7 @@ func (manager *application) unregisterWindow(target *readerWindow) {
 // A sidebar selection always replaces this window, even if another window is
 // already displaying that path. Keep both windows registered independently.
 func (manager *application) replaceWindowPath(target *readerWindow, path string) bool {
-	if target == nil || target.closed || !(document.IsMarkdownPath(path) || isPreviewImagePath(path)) {
+	if target == nil || target.closed || !isReaderPreviewPath(path) {
 		return false
 	}
 	manager.unregisterWindow(target)
@@ -191,7 +191,7 @@ func (manager *application) replaceWindowPath(target *readerWindow, path string)
 }
 
 func (manager *application) switchDocument(target *readerWindow, path string) {
-	if target == nil || target.closed || !(document.IsMarkdownPath(path) || isPreviewImagePath(path)) {
+	if target == nil || target.closed || !isReaderPreviewPath(path) {
 		return
 	}
 	target.cancelSidebarSwitch()
@@ -208,7 +208,7 @@ func (manager *application) switchDocument(target *readerWindow, path string) {
 			result.images = newImageStore(ctx, path, resources.images)
 			result.preview, result.err = result.images.Load(path)
 		} else {
-			result.source, result.prepared, result.err = loadReaderDocument(ctx, path, resources)
+			result = loadReaderFile(ctx, path, resources, "", false)
 		}
 		if ctx.Err() != nil {
 			if result.images != nil {

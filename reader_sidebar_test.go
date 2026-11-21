@@ -2,16 +2,17 @@ package main
 
 import (
 	"context"
-	"github.com/egoist/mygo/ui"
 	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func TestSidebarDirectoryEntries(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"one.md", "two.MARKDOWN", "notes.txt", "image.png"} {
+	for _, name := range []string{"one.md", "two.MARKDOWN", "notes.txt", "run.py", "image.png", "data.bin"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("# Document"), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -23,11 +24,11 @@ func TestSidebarDirectoryEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 5 {
+	if len(entries) != 7 {
 		t.Fatalf("entries: %+v", entries)
 	}
 	for _, entry := range entries {
-		want := entry.name == "one.md" || entry.name == "two.MARKDOWN" || entry.name == "image.png"
+		want := entry.name != "folder.md" && entry.name != "data.bin"
 		if entry.enabled != want {
 			t.Fatalf("entry: %+v", entry)
 		}
@@ -37,7 +38,7 @@ func TestSidebarDirectoryEntries(t *testing.T) {
 func TestSidebarToggleAndNavigation(t *testing.T) {
 	a := &readerWindow{documentSession: documentSession{path: "/tmp/one.md", source: "# Reading\n\n```go\nlong code\n```"}}
 	prepareTestReader(t, a)
-	entries := []sidebarEntry{{name: "one.md", path: "/tmp/one.md", enabled: true}, {name: "two.md", path: "/tmp/two.md", enabled: true}, {name: "notes.txt", path: "/tmp/notes.txt"}, {name: "folder", path: "/tmp/folder", directory: true}}
+	entries := []sidebarEntry{{name: "one.md", path: "/tmp/one.md", enabled: true}, {name: "two.md", path: "/tmp/two.md", enabled: true}, {name: "notes.txt", path: "/tmp/notes.txt", enabled: true}, {name: "data.bin", path: "/tmp/data.bin"}, {name: "folder", path: "/tmp/folder", directory: true}}
 	selected := ""
 	a.openSibling = func(path string) { selected = path }
 	tt := ui.NewTester(a.view, 900, 720)
@@ -57,7 +58,7 @@ func TestSidebarToggleAndNavigation(t *testing.T) {
 	if info, ok := tt.Access("two.md"); !ok || info.Description != "" {
 		t.Fatalf("file row still exposes a path tooltip: %+v", info)
 	}
-	for _, name := range []string{"notes.txt", "folder"} {
+	for _, name := range []string{"data.bin", "folder"} {
 		tt.Click(name)
 		if selected != "" {
 			t.Fatalf("disabled entry opened %q", selected)
@@ -68,6 +69,9 @@ func TestSidebarToggleAndNavigation(t *testing.T) {
 	}
 	if selected != "/tmp/two.md" {
 		t.Fatalf("selected %q", selected)
+	}
+	if err := tt.Click("notes.txt"); err != nil || selected != "/tmp/notes.txt" {
+		t.Fatalf("text selection = %q, err = %v", selected, err)
 	}
 	for _, width := range []int{480, 900, 1600} {
 		tt.SetSize(width, 720)
@@ -112,8 +116,11 @@ func TestSidebarReplacesWindowRegistry(t *testing.T) {
 	if len(manager.windows) != 1 {
 		t.Fatal("closing other window removed current window")
 	}
-	if manager.replaceWindowPath(first, "/notes.txt") || first.path != "/two.md" {
+	if manager.replaceWindowPath(first, "/data.bin") || first.path != "/two.md" {
 		t.Fatal("accepted unsupported file")
+	}
+	if !manager.replaceWindowPath(first, "/notes.txt") || manager.windows["/notes.txt"] != first {
+		t.Fatal("text file did not replace the window preview")
 	}
 	if !manager.replaceWindowPath(first, "/three.md") || manager.windows["/three.md"] != first {
 		t.Fatal("window was not rekeyed")
@@ -205,9 +212,8 @@ func TestSidebarFolderExpansionAndSpacing(t *testing.T) {
 	if !tt.HasText("notes.txt") {
 		t.Fatal("folder without Markdown did not show its files")
 	}
-	tt.Click("notes.txt")
-	if a.path != filepath.Join(dir, "root.md") {
-		t.Fatal("unsupported file was opened")
+	if err := tt.Click("notes.txt"); err != nil || a.path != filepath.Join(dir, "text-only", "notes.txt") {
+		t.Fatalf("nested text was not opened: %q, %v", a.path, err)
 	}
 	expand("nested", filepath.Join(dir, "nested"))
 	expand("deeper", filepath.Join(dir, "nested/deeper"))

@@ -41,7 +41,7 @@ func (a *readerWindow) readerBlockStyle(c *ui.Context, d *parser.Document, i int
 func (a *readerWindow) linkHandler(c *ui.Context) func(string) {
 	services := c.Services()
 	return func(dest string) {
-		action := document.NativePolicy().Link(dest)
+		action := nativeReaderLink(dest)
 		if action == document.IgnoreLink {
 			return
 		}
@@ -56,15 +56,21 @@ func (a *readerWindow) linkHandler(c *ui.Context) func(string) {
 		case document.OpenExternal:
 			services.OpenURL(dest)
 		case document.OpenLocalDocument:
-			if a.openDocument != nil {
-				path := document.LocalDocumentPath(dest)
-				switch {
-				case filepath.IsAbs(path):
-				case os.IsPathSeparator(path[0]):
-					path = filepath.VolumeName(a.path) + path
-				default:
-					path = filepath.Join(filepath.Dir(a.path), path)
+			path := localReaderPath(dest)
+			text := isTextPreviewPath(path)
+			switch {
+			case filepath.IsAbs(path):
+			case os.IsPathSeparator(path[0]):
+				path = filepath.VolumeName(a.path) + path
+			default:
+				path = filepath.Join(filepath.Dir(a.path), path)
+			}
+			if text && a.openSibling != nil {
+				if !a.sidebar.open {
+					a.toggleSidebar()
 				}
+				a.openSibling(path)
+			} else if a.openDocument != nil {
 				a.openDocument(path)
 			}
 		}

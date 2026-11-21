@@ -48,12 +48,16 @@ func (a *readerWindow) titleBar(c *ui.Context) {
 		}
 		ui.Text(c, title).FontSize(13).FontWeight(500).TextColor(foreground).MaxWidth(600)
 		if a.path != "" && !isPreviewImagePath(a.path) && !a.loading && a.failure == "" {
+			copyLabel := "复制 Markdown 全文"
+			if a.textPreview != nil {
+				copyLabel = "复制文件全文"
+			}
 			icon := readerCopyIcon
 			if !a.copiedAt.IsZero() && c.Now().Sub(a.copiedAt) < 2*time.Second {
 				icon = readerCheckIcon
 			}
 			button := ui.ButtonBase(c).Key("copy-document").Absolute().Right(bar.Right+12).Top(6).
-				Size(28, 28).Radius(5).Center().Label("复制 Markdown 全文").Tooltip("复制 Markdown 全文")
+				Size(28, 28).Radius(5).Center().Label(copyLabel).Tooltip(copyLabel)
 			if button.Hovered() {
 				button.Background(foreground.Alpha(0.08))
 			}

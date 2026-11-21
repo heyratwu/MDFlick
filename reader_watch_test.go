@@ -107,7 +107,8 @@ func TestReaderRendersExternallySavedContents(t *testing.T) {
 			t.Fatal("save did not trigger reload")
 		}
 		loadCtx, version := a.beginLoad()
-		source, prepared, err := loadReaderDocument(loadCtx, path, resources)
+		result := loadReaderFile(loadCtx, path, resources, "", false)
+		source, prepared, err := result.source, result.prepared, result.err
 		if err != nil || !a.completePrepared(version, source, prepared, err) {
 			t.Fatalf("reload failed: %v", err)
 		}

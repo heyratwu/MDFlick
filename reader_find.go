@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 const readerFindInset = 62
@@ -25,7 +26,14 @@ type readerFindText struct {
 }
 
 func (a *readerWindow) showFind() {
-	if a.closed || a.prepared.parsed == nil {
+	if a.closed || a.loading || a.failure != "" {
+		return
+	}
+	if a.textPreview != nil {
+		a.textPreview.Run(editor.Find)
+		return
+	}
+	if a.prepared.parsed == nil {
 		return
 	}
 	if !a.find.open {

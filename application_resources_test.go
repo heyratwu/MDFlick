@@ -17,7 +17,7 @@ func TestLoadAdmissionAndCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { _, _, err := loadReaderDocument(ctx, "/missing.md", resources); done <- err }()
+	go func() { done <- loadReaderFile(ctx, "/missing.md", resources, "", false).err }()
 	cancel()
 	select {
 	case err := <-done:
@@ -37,7 +37,8 @@ func TestLoadAdmissionAndCancellation(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# Current"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	source, prepared, err := loadReaderDocument(context.Background(), path, resources)
+	result := loadReaderFile(context.Background(), path, resources, "", false)
+	source, prepared, err := result.source, result.prepared, result.err
 	if err != nil || source != "# Current" || prepared.markdown != source || len(resources.loads) != 0 {
 		t.Fatalf("next load failed or leaked slot: %q %+v %v", source, prepared, err)
 	}

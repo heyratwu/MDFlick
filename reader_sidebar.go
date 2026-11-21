@@ -65,6 +65,10 @@ type sidebarRow struct {
 	depth int
 }
 
+func isReaderPreviewPath(path string) bool {
+	return document.IsMarkdownPath(path) || isPreviewImagePath(path) || isTextPreviewPath(path)
+}
+
 func (s *readerSidebar) rows() []sidebarRow {
 	var rows []sidebarRow
 	var appendEntries func([]sidebarEntry, int)
@@ -146,10 +150,11 @@ func readSidebarEntries(directory string) ([]sidebarEntry, error) {
 	for _, file := range files {
 		path := filepath.Join(directory, file.Name())
 		enabled, directory := false, file.IsDir()
-		if document.IsMarkdownPath(path) || isPreviewImagePath(path) || file.Type()&os.ModeSymlink != 0 {
+		supported := isReaderPreviewPath(path)
+		if supported || file.Type()&os.ModeSymlink != 0 {
 			if info, err := os.Stat(path); err == nil {
 				directory = info.IsDir()
-				enabled = info.Mode().IsRegular() && (document.IsMarkdownPath(path) || isPreviewImagePath(path))
+				enabled = info.Mode().IsRegular() && supported
 			}
 		}
 		entries = append(entries, sidebarEntry{name: file.Name(), path: path, enabled: enabled, directory: directory})
@@ -164,15 +169,10 @@ func (a *readerWindow) toggleSidebar() {
 	}
 }
 
-// File switches within the displayed directory retain the list and its scroll
-// state. Only moving to a different directory needs another directory read.
+// Keep the directory tree and its scroll state when opening one of its descendants.
 func (a *readerWindow) updateSidebarDirectory() {
-	if a.path != "" {
-		directory := filepath.Dir(a.path)
-		if a.sidebar.directory == directory {
-			return
-		}
-		if folder := a.sidebar.folders[directory]; folder != nil && folder.loaded {
+	if a.path != "" && a.sidebar.directory != "" {
+		if rel, err := filepath.Rel(a.sidebar.directory, a.path); err == nil && filepath.IsLocal(rel) {
 			return
 		}
 	}
