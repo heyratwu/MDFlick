@@ -93,11 +93,12 @@ func (a *readerWindow) loadInitialSelection() {
 	}
 }
 
-func (manager *application) newWindow(path string, directory bool, openedAt time.Time) *readerWindow {
+func (manager *application) newWindow(path string, directory, showSidebar bool, openedAt time.Time) *readerWindow {
 	if manager.resources == nil {
 		manager.resources = newApplicationResources()
 	}
 	a := &readerWindow{resources: manager.resources, openStarted: openedAt}
+	a.sidebar.open = showSidebar
 	a.setInitialPath(path, directory)
 	a.open = func() { manager.openDialog(a, false) }
 	a.openSibling = func(path string) { manager.switchDocument(a, path) }
@@ -133,6 +134,9 @@ func (manager *application) newWindow(path string, directory bool, openedAt time
 	a.openDocument = func(path string) {
 		a.win.Update(func() { manager.openPath(path, a) })
 	}
+	a.openSkill = func(path string) {
+		a.win.Update(func() { manager.openPathWithSidebar(path, a, true) })
+	}
 	manager.registerWindow(a, path)
 	a.win.OnClosed(func() {
 		a.close()
@@ -143,6 +147,9 @@ func (manager *application) newWindow(path string, directory bool, openedAt time
 		}
 	})
 	a.loadInitialSelection()
+	if path == "" {
+		a.loadWelcomeSkills()
+	}
 	return a
 }
 
@@ -171,6 +178,10 @@ func nextWindowBounds(previous, workArea mygo.Rectangle) mygo.Rectangle {
 }
 
 func (manager *application) openPath(path string, target *readerWindow) {
+	manager.openPathWithSidebar(path, target, false)
+}
+
+func (manager *application) openPathWithSidebar(path string, target *readerWindow, showSidebar bool) {
 	openedAt := time.Now()
 	if target == nil {
 		target = manager.windows[""]
@@ -186,7 +197,7 @@ func (manager *application) openPath(path string, target *readerWindow) {
 	directory := isDirectory(absolute)
 	for _, a := range manager.windows {
 		if (directory && a.sidebar.root == absolute) || (!directory && a.path == absolute) {
-			if directory && !a.sidebar.open {
+			if (directory || showSidebar) && !a.sidebar.open {
 				a.toggleSidebar()
 				a.win.Invalidate()
 			}
@@ -196,13 +207,14 @@ func (manager *application) openPath(path string, target *readerWindow) {
 		}
 	}
 	if manager.assignHome(target, absolute, directory) {
+		target.sidebar.open = target.sidebar.open || showSidebar
 		target.openStarted = openedAt
 		target.win.SetTitle(target.title())
 		target.loadInitialSelection()
 		target.win.Invalidate()
 		return
 	}
-	manager.newWindow(absolute, directory, openedAt)
+	manager.newWindow(absolute, directory, showSidebar, openedAt)
 }
 
 func isDirectory(path string) bool {

@@ -53,7 +53,7 @@ func main() {
 	// MyGo quits when the last window closes unless a listener overrides it.
 	mygo.App.WhenReady(func() {
 		if len(manager.windows) == 0 {
-			manager.newWindow("", false, time.Now())
+			manager.newWindow("", false, false, time.Now())
 		}
 	})
 	if err := mygo.App.Run(); err != nil {

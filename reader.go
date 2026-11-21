@@ -34,7 +34,10 @@ type readerWindow struct {
 	open             func()
 	openDocument     func(string)
 	openSibling      func(string)
+	openSkill        func(string)
 	sidebar          readerSidebar
+	welcomeSkills    []skillDirectory
+	welcomeSkillTab  int
 	performance      readerPerformance
 	openStarted      time.Time
 	copiedAt         time.Time
@@ -94,13 +97,7 @@ func (a *readerWindow) documentView(c *ui.Context) {
 			ui.Text(c, "请选择文件预览").TextColor(t.TextMuted)
 		})
 	} else if a.path == "" {
-		// The extra 100 DIPs below move the centered welcome content up 50.
-		ui.Column(c).Grow(1).Center().Gap(16).Padding(32, 32, 132, 32).Children(func() {
-			ui.Text(c, "轻松阅读 Markdown").FontSize(20)
-			ui.Text(c, "在 Finder 中选中文件，按空格即可快速预览。").TextColor(t.TextMuted)
-			// Match a regular button's 1-DIP border without changing the accent face.
-			ui.PrimaryButton(c, "打开文件…").Border(1, ui.Transparent).OnClick(a.open)
-		})
+		a.welcomeView(c)
 	} else if isPreviewImagePath(a.path) {
 		a.imagePreview(c)
 	} else if a.textPreview != nil {
