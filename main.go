@@ -25,6 +25,9 @@ func main() {
 			{Label: "打开目录…", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
 				manager.openDialog(manager.readerForWindow(w), true)
 			}},
+			{Label: "新窗口", Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) {
+				manager.newWelcomeWindow()
+			}},
 			{Role: mygo.RoleOpenRecent},
 			{Label: "重新载入", Accelerator: "CmdOrCtrl+R", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
 				for _, a := range manager.windows {
@@ -53,7 +56,7 @@ func main() {
 	// MyGo quits when the last window closes unless a listener overrides it.
 	mygo.App.WhenReady(func() {
 		if len(manager.windows) == 0 {
-			manager.newWindow("", false, false, time.Now())
+			manager.newWelcomeWindow()
 		}
 	})
 	if err := mygo.App.Run(); err != nil {

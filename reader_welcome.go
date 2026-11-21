@@ -82,7 +82,7 @@ func (a *readerWindow) welcomeView(c *ui.Context) {
 		welcome.Justify(ui.Center).Padding(24, 20)
 	}
 	welcome.Children(func() {
-		ui.Text(c, "轻松阅读 Markdown").FontSize(20)
+		ui.Text(c, "轻松阅读 Markdown 和 Skills").FontSize(20)
 		ui.Text(c, "在 Finder 中选中文件，按空格即可快速预览。").TextColor(t.TextMuted)
 		// Match a regular button's 1-DIP border without changing the accent face.
 		ui.PrimaryButton(c, "打开文件…").Border(1, ui.Transparent).OnClick(a.open)

@@ -19,15 +19,17 @@ type application struct {
 	resources *applicationResources
 }
 
-// assignHome moves an existing welcome window into the window registry.
-// A closed or already occupied window must never consume another selection.
-func (a *application) assignHome(target *readerWindow, path string, directory bool) bool {
-	if target == nil || target.closed || a.windows[""] != target {
+func (a *readerWindow) isWelcome() bool {
+	return a != nil && !a.closed && a.path == "" && a.sidebar.root == ""
+}
+
+// assignHome reuses a registered welcome window for a file or directory.
+func (manager *application) assignHome(target *readerWindow, path string, directory bool) bool {
+	if !target.isWelcome() || !manager.unregisterWindow(target) {
 		return false
 	}
-	delete(a.windows, "")
 	target.setInitialPath(path, directory)
-	a.registerWindow(target, path)
+	manager.registerWindow(target, path)
 	return true
 }
 
@@ -91,6 +93,10 @@ func (a *readerWindow) loadInitialSelection() {
 	if a.sidebar.open {
 		a.updateSidebarDirectory()
 	}
+}
+
+func (manager *application) newWelcomeWindow() {
+	manager.newWindow("", false, false, time.Now())
 }
 
 func (manager *application) newWindow(path string, directory, showSidebar bool, openedAt time.Time) *readerWindow {
@@ -181,10 +187,22 @@ func (manager *application) openPath(path string, target *readerWindow) {
 	manager.openPathWithSidebar(path, target, false)
 }
 
+func (manager *application) welcomeWindow() *readerWindow {
+	if home := manager.windows[""]; home.isWelcome() {
+		return home
+	}
+	for _, a := range manager.windows {
+		if a.isWelcome() {
+			return a
+		}
+	}
+	return nil
+}
+
 func (manager *application) openPathWithSidebar(path string, target *readerWindow, showSidebar bool) {
 	openedAt := time.Now()
 	if target == nil {
-		target = manager.windows[""]
+		target = manager.welcomeWindow()
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -239,12 +257,14 @@ func (manager *application) readerForWindow(win *mygo.Window) *readerWindow {
 	return nil
 }
 
-func (manager *application) unregisterWindow(target *readerWindow) {
+func (manager *application) unregisterWindow(target *readerWindow) bool {
 	for key, window := range manager.windows {
 		if window == target {
 			delete(manager.windows, key)
+			return true
 		}
 	}
+	return false
 }
 
 // A sidebar selection always replaces this window, even if another window is

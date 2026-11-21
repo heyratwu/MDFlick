@@ -12,7 +12,7 @@ func TestReaderStates(t *testing.T) {
 	a := &readerWindow{open: func() { opened++ }}
 	prepareTestReader(t, a)
 	tt := ui.NewTester(a.view, 900, 720)
-	if !tt.HasText("轻松阅读 Markdown") {
+	if !tt.HasText("轻松阅读 Markdown 和 Skills") {
 		t.Fatal(tt.Texts())
 	}
 	if tt.HasText("打开 .md 或 .markdown 文件 · ⌘O") {
@@ -76,6 +76,40 @@ func TestAssignHome(t *testing.T) {
 	manager.windows[""] = closed
 	if manager.assignHome(closed, "/tmp/second.md", false) {
 		t.Fatal("closed window accepted")
+	}
+}
+
+func TestAssignHomeWithMultipleWelcomeWindows(t *testing.T) {
+	first, second := &readerWindow{}, &readerWindow{}
+	manager := &application{windows: make(map[string]*readerWindow)}
+	manager.registerWindow(first, "")
+	manager.registerWindow(second, "")
+
+	if !manager.assignHome(second, "/tmp/docs", true) {
+		t.Fatal("second welcome window could not open a directory")
+	}
+	if manager.windows["/tmp/docs"] != second || second.sidebar.root != "/tmp/docs" || !second.sidebar.open {
+		t.Fatal("directory should occupy the second window")
+	}
+	if manager.assignHome(second, "/tmp/second.md", false) {
+		t.Fatal("directory window consumed another selection")
+	}
+	if manager.welcomeWindow() != first || !manager.assignHome(first, "/tmp/first.md", false) {
+		t.Fatal("first welcome window should still be available")
+	}
+	if len(manager.windows) != 2 || manager.windows["/tmp/first.md"] != first {
+		t.Fatal("the two windows should remain registered independently")
+	}
+	if manager.assignHome(&readerWindow{}, "/tmp/unregistered.md", false) {
+		t.Fatal("unregistered window consumed a selection")
+	}
+
+	first, second = &readerWindow{}, &readerWindow{}
+	manager.registerWindow(first, "")
+	manager.registerWindow(second, "")
+	manager.unregisterWindow(first)
+	if manager.welcomeWindow() != second {
+		t.Fatal("remaining welcome window was not found")
 	}
 }
 
