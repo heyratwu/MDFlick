@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"mdflick/internal/document"
@@ -30,12 +31,20 @@ var readerCollapseFoldersSVG []byte
 //go:embed resources/file-image.svg
 var readerImageSVG []byte
 
+//go:embed resources/file-code.svg
+var readerCodeSVG []byte
+
+//go:embed resources/file-text.svg
+var readerTextSVG []byte
+
 var (
 	readerSidebarIcon         = ui.MustParseSVG(readerSidebarSVG)
 	readerFolderIcon          = ui.MustParseSVG(readerFolderSVG)
 	readerFolderOpenIcon      = ui.MustParseSVG(readerFolderOpenSVG)
 	readerImageIcon           = ui.MustParseSVG(readerImageSVG)
 	readerFileIcon            = ui.MustParseSVG(readerFileSVG)
+	readerCodeIcon            = ui.MustParseSVG(readerCodeSVG)
+	readerTextIcon            = ui.MustParseSVG(readerTextSVG)
 	readerMarkdownIcon        = ui.MustParseSVG(readerMarkdownSVG)
 	readerCollapseFoldersIcon = ui.MustParseSVG(readerCollapseFoldersSVG)
 )
@@ -67,6 +76,25 @@ type sidebarFolder struct {
 type sidebarRow struct {
 	sidebarEntry
 	depth int
+}
+
+func (entry sidebarEntry) icon(expanded bool) *ui.SVG {
+	switch {
+	case entry.directory && expanded:
+		return readerFolderOpenIcon
+	case entry.directory:
+		return readerFolderIcon
+	case document.IsMarkdownPath(entry.path):
+		return readerMarkdownIcon
+	case isImagePath(entry.path):
+		return readerImageIcon
+	case strings.EqualFold(filepath.Ext(entry.path), ".txt"):
+		return readerTextIcon
+	case isCodeFilePath(entry.path):
+		return readerCodeIcon
+	default:
+		return readerFileIcon
+	}
 }
 
 func isReaderPreviewPath(path string) bool {
@@ -340,20 +368,7 @@ func (a *readerWindow) sidebarView(c *ui.Context) {
 				button.Background(t.TextMuted.Alpha(.08))
 			}
 			button.Children(func() {
-				icon := readerFileIcon
-				if !entry.directory && document.IsMarkdownPath(entry.path) {
-					icon = readerMarkdownIcon
-				}
-				if !entry.directory && isImagePath(entry.path) {
-					icon = readerImageIcon
-				}
-				if entry.directory {
-					icon = readerFolderIcon
-					if expanded {
-						icon = readerFolderOpenIcon
-					}
-				}
-				ui.Icon(c, icon).Size(16, 16).Shrink(0).TextColor(color)
+				ui.Icon(c, entry.icon(expanded)).Size(16, 16).Shrink(0).TextColor(color)
 				ui.Text(c, entry.name).MinWidth(0).FontSize(13).TextColor(color).MaxLines(1).Ellipsis("…").Unselectable()
 			})
 			button.OnClick(func() {

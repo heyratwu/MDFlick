@@ -10,6 +10,30 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestSidebarFileIcons(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		directory bool
+		want      *ui.SVG
+	}{
+		{"main.go", false, readerCodeIcon},
+		{"script.PY", false, readerCodeIcon},
+		{"component.tsx", false, readerCodeIcon},
+		{"script.ps1", false, readerCodeIcon},
+		{"Dockerfile", false, readerCodeIcon},
+		{"notes.TXT", false, readerTextIcon},
+		{"SKILL.md", false, readerMarkdownIcon},
+		{"logo.svg", false, readerImageIcon},
+		{"archive.zip", false, readerFileIcon},
+		{"folder.txt", true, readerFolderIcon},
+	} {
+		entry := sidebarEntry{path: tc.name, directory: tc.directory}
+		if entry.icon(false) != tc.want {
+			t.Errorf("wrong icon for %s", tc.name)
+		}
+	}
+}
+
 func TestSidebarDirectoryEntries(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"one.md", "two.MARKDOWN", "notes.txt", "run.py", "image.png", "data.bin"} {

@@ -13,15 +13,26 @@ import (
 	"mdflick/internal/typography"
 )
 
-func isTextPreviewPath(path string) bool {
-	if path == "" || document.IsMarkdownPath(path) || isImagePath(path) || os.IsPathSeparator(path[len(path)-1]) {
-		return false
-	}
+func isCodeFilePath(path string) bool {
 	if editor.LanguageFor(path) != nil {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
-	case "", ".txt", ".text", ".log", ".env", ".example", ".csv", ".tsv", ".rst", ".adoc", ".ps1", ".bat", ".cmd", ".awk", ".lock":
+	case ".ps1", ".bat", ".cmd", ".awk":
+		return true
+	}
+	return false
+}
+
+func isTextPreviewPath(path string) bool {
+	if path == "" || document.IsMarkdownPath(path) || isImagePath(path) || os.IsPathSeparator(path[len(path)-1]) {
+		return false
+	}
+	if isCodeFilePath(path) {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case "", ".txt", ".text", ".log", ".env", ".example", ".csv", ".tsv", ".rst", ".adoc", ".lock":
 		return true
 	}
 	name := strings.ToLower(filepath.Base(path))
