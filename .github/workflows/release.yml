@@ -3,12 +3,21 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (vX.Y.Z)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   package:
@@ -25,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -37,7 +47,7 @@ jobs:
         shell: bash
         run: |
           version=$(jq -er '.version' mygo.json)
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$GITHUB_REF_NAME" != "v$version" ]]; then
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$RELEASE_TAG" != "v$version" ]]; then
             echo "Expected tag v$version for the version in mygo.json." >&2
             exit 1
           fi
@@ -71,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          fetch-depth: 0
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
@@ -84,7 +94,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${RELEASE_TAG#v}
           assets=(
             "dist/mdflick-$version-arm64.dmg"
             "dist/mdflick-$version-amd64.dmg"
@@ -95,7 +105,7 @@ jobs:
             test -s "$asset"
           done
           notes="$RUNNER_TEMP/release-notes.md"
-          git for-each-ref --format='%(contents:subject)%0a%0a%(contents:body)' "refs/tags/$GITHUB_REF_NAME" > "$notes"
+          git for-each-ref --format='%(contents)' "refs/tags/$RELEASE_TAG" > "$notes"
           printf '\nmacOS packages are ad hoc signed and have not been notarized by Apple.\n' >> "$notes"
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
-            --verify-tag --title "MDFlick $GITHUB_REF_NAME" --notes-file "$notes"
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
+            --verify-tag --title "MDFlick $RELEASE_TAG" --notes-file "$notes"
