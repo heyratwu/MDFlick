@@ -57,7 +57,9 @@ func (a *readerWindow) linkHandler(c *ui.Context) func(string) {
 			services.OpenURL(dest)
 		case document.OpenLocalDocument:
 			path := localReaderPath(dest)
-			text := isTextPreviewPath(path)
+			if path == "" {
+				return
+			}
 			switch {
 			case filepath.IsAbs(path):
 			case os.IsPathSeparator(path[0]):
@@ -65,10 +67,18 @@ func (a *readerWindow) linkHandler(c *ui.Context) func(string) {
 			default:
 				path = filepath.Join(filepath.Dir(a.path), path)
 			}
-			if text && a.openSibling != nil {
+			path = filepath.Clean(path)
+			base := a.sidebar.directory
+			if base == "" {
+				base = filepath.Dir(a.path)
+			}
+			relative, err := filepath.Rel(base, path)
+			inSidebar := a.sidebar.open && err == nil && relative != "." && filepath.IsLocal(relative)
+			if a.openSibling != nil && (inSidebar || !a.sidebar.open && isTextPreviewPath(path)) {
 				if !a.sidebar.open {
 					a.toggleSidebar()
 				}
+				a.revealSidebarPath(path)
 				a.openSibling(path)
 			} else if a.openDocument != nil {
 				a.openDocument(path)

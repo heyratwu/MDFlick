@@ -71,3 +71,49 @@ func TestReaderLocalSourceLinkOpensInCurrentPane(t *testing.T) {
 		t.Fatalf("nested link replaced the Skill directory: %q", a.sidebar.directory)
 	}
 }
+
+func TestReaderLinksRevealSidebarAncestors(t *testing.T) {
+	base := t.TempDir()
+	docs := filepath.Join(base, "docs")
+	chapter := filepath.Join(docs, "chapter")
+	a := &readerWindow{
+		documentSession: documentSession{
+			path:   filepath.Join(docs, "source.md"),
+			source: "[Guide](chapter/deep/guide.md) [Script](chapter/tool.py) [Notes](notes.txt) [Outside](../docs-other/other.md)",
+		},
+		sidebar: readerSidebar{open: true, directory: docs},
+	}
+	var sibling, external string
+	a.openSibling = func(path string) { sibling = path }
+	a.openDocument = func(path string) { external = path }
+	prepareTestReader(t, a)
+	tt := ui.NewTester(a.view, 900, 720)
+	click := func(label string) {
+		t.Helper()
+		r, ok := tt.Find("\uFFFC\u2060" + label)
+		if !ok {
+			t.Fatalf("missing link %s", label)
+		}
+		tt.ClickAt(r.X+3, r.Y+r.H/2)
+	}
+	for _, tc := range []struct{ label, path string }{
+		{"Guide", filepath.Join(chapter, "deep", "guide.md")},
+		{"Script", filepath.Join(chapter, "tool.py")},
+		{"Notes", filepath.Join(docs, "notes.txt")},
+	} {
+		click(tc.label)
+		if sibling != tc.path || external != "" {
+			t.Fatalf("%s routed to current pane %q and another window %q", tc.label, sibling, external)
+		}
+	}
+	for _, path := range []string{chapter, filepath.Join(chapter, "deep")} {
+		if folder := a.sidebar.folders[path]; folder == nil || !folder.expanded {
+			t.Fatalf("ancestor %q was not expanded", path)
+		}
+	}
+	sibling = ""
+	click("Outside")
+	if sibling != "" || external != filepath.Join(base, "docs-other", "other.md") {
+		t.Fatalf("outside link routed to current pane %q and another window %q", sibling, external)
+	}
+}

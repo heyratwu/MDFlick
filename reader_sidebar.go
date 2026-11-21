@@ -133,6 +133,23 @@ func (s *readerSidebar) rows() []sidebarRow {
 }
 
 func (a *readerWindow) toggleSidebarFolder(path string) {
+	folder := a.sidebar.folders[path]
+	a.setSidebarFolderExpanded(path, folder == nil || !folder.expanded)
+}
+
+func (a *readerWindow) revealSidebarPath(path string) {
+	base := a.sidebar.directory
+	relative, err := filepath.Rel(base, filepath.Dir(path))
+	if base == "" || err != nil || !filepath.IsLocal(relative) || relative == "." {
+		return
+	}
+	for _, name := range strings.Split(relative, string(filepath.Separator)) {
+		base = filepath.Join(base, name)
+		a.setSidebarFolderExpanded(base, true)
+	}
+}
+
+func (a *readerWindow) setSidebarFolderExpanded(path string, expanded bool) {
 	s := &a.sidebar
 	if s.folders == nil {
 		s.folders = make(map[string]*sidebarFolder)
@@ -142,7 +159,7 @@ func (a *readerWindow) toggleSidebarFolder(path string) {
 		folder = &sidebarFolder{}
 		s.folders[path] = folder
 	}
-	folder.expanded = !folder.expanded
+	folder.expanded = expanded
 	if !folder.expanded || folder.loaded || folder.loading {
 		return
 	}
